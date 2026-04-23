@@ -13,6 +13,77 @@ function setText(id, value) {
   document.getElementById(id).textContent = value;
 }
  
+function updateMoistureBar(moisture, targetLow, targetHigh) {
+  const fill = document.getElementById('moistureFill');
+  const marker = document.getElementById('moistureMarker');
+  const dryLabel = document.getElementById('labelDry');
+  const idealLabel = document.getElementById('labelIdeal');
+  const wetLabel = document.getElementById('labelWet');
+ 
+  if (!fill || !marker || !dryLabel || !idealLabel || !wetLabel) {
+    return;
+  }
+ 
+  const currentMoisture = Number(moisture);
+  const minTarget = Number(targetLow);
+  const maxTarget = Number(targetHigh);
+ 
+  const safePercent = Number.isNaN(currentMoisture)
+    ? 0
+    : Math.min(100, Math.max(0, currentMoisture));
+ 
+  fill.style.width = `${safePercent}%`;
+  marker.style.left = `${safePercent}%`;
+ 
+  dryLabel.classList.remove('active');
+  idealLabel.classList.remove('active');
+  wetLabel.classList.remove('active');
+ 
+  if (Number.isNaN(currentMoisture) || Number.isNaN(minTarget) || Number.isNaN(maxTarget)) {
+    return;
+  }
+ 
+  if (currentMoisture < minTarget) {
+    dryLabel.classList.add('active');
+  } else if (currentMoisture > maxTarget) {
+    wetLabel.classList.add('active');
+  } else {
+    idealLabel.classList.add('active');
+  }
+}
+ 
+function getCareAdvice(moisture, targetLow, targetHigh) {
+  const currentMoisture = Number(moisture);
+  const minTarget = Number(targetLow);
+  const maxTarget = Number(targetHigh);
+ 
+  if ([currentMoisture, minTarget, maxTarget].some((value) => Number.isNaN(value))) {
+    return {
+      title: 'Waiting for data...',
+      hint: 'Live care guidance will appear when the device sends valid values.'
+    };
+  }
+ 
+  if (currentMoisture < minTarget) {
+    return {
+      title: 'Needs watering',
+      hint: `Moisture is below the ideal ${minTarget}-${maxTarget}% range.`
+    };
+  }
+ 
+  if (currentMoisture > maxTarget) {
+    return {
+      title: 'Too wet now',
+      hint: `Moisture is above the ideal ${minTarget}-${maxTarget}% range. Let soil dry a bit.`
+    };
+  }
+ 
+  return {
+    title: 'Plant is in ideal range',
+    hint: `Current moisture is healthy for the ${minTarget}-${maxTarget}% target band.`
+  };
+}
+ 
 function formatSeconds(seconds) {
   if (seconds == null || Number.isNaN(Number(seconds))) {
     return '--';
@@ -65,8 +136,14 @@ async function refreshRemoteStatus() {
     setText('raw', data.raw ?? '--');
     setText('ip', data.ip ?? '--');
     setText('targetRange', data.targetRange ?? '--');
+    setText('requiredMoisture', data.targetRange ?? '--');
     setText('lastChange', formatSeconds(data.lastChangeSec));
     setText('uptime', formatMinutes(data.uptimeMin));
+    updateMoistureBar(data.moisture, data.targetLow, data.targetHigh);
+ 
+    const advice = getCareAdvice(data.moisture, data.targetLow, data.targetHigh);
+    setText('careAdvice', advice.title);
+    setText('careHint', advice.hint);
  
     connection.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
     connection.className = '';
