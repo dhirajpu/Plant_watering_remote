@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Plant Life Care </title>
+  <title>Plant Life Care</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='52' font-size='48'%3E🪴%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="./styles.css">
 </head>
@@ -13,7 +13,7 @@
       <div class="hero">
         <div>
           <p class="eyebrow">Smart Plant Monitor System</p>
-          <h1> 🪴 Plant Life Care</h1>
+          <h1>Plant Life Care</h1>
           <p class="subtitle">Live moisture, pump, and device health in one simple dashboard.</p>
         </div>
         <div class="hero-chip">
@@ -21,13 +21,13 @@
           <span class="chip-value" id="status">Loading...</span>
         </div>
       </div>
- 
+
       <section class="spotlight">
         <div class="spotlight-card moisture-card">
           <span class="label">Moisture Level</span>
           <span class="value large" id="moisture">--%</span>
           <span class="hint">Current soil moisture</span>
- 
+
           <div class="moisture-progress">
             <div class="progress-track">
               <div class="progress-fill" id="moistureFill"></div>
@@ -46,7 +46,21 @@
           <span class="hint">Updating data from monitoring system</span>
         </div>
       </section>
- 
+
+      <section class="weather-panel">
+        <div class="weather-card">
+          <div>
+            <span class="label">Outside Temperature</span>
+            <span class="value medium" id="outsideTemp">--°C</span>
+            <span class="hint" id="weatherSummary">Fetching live Bangalore weather...</span>
+          </div>
+          <div class="weather-meta">
+            <span class="weather-location" id="weatherLocation">Bangalore, India</span>
+            <span class="weather-updated" id="weatherUpdated">Waiting for weather update...</span>
+          </div>
+        </div>
+      </section>
+
       <section class="care-panel">
         <div class="care-card range-card">
           <span class="label">Plant Required Moisture</span>
@@ -59,7 +73,7 @@
           <span class="hint" id="careHint">The recommendation updates from the current moisture level.</span>
         </div>
       </section>
- 
+
       <div class="grid">
         <div class="metric">
           <span class="label">Raw Sensor</span>
@@ -94,14 +108,14 @@
           <span class="value small" id="uptime">--</span>
         </div>
       </div>
- 
+
       <div class="footer">
         <span class="footer-title">Plant Life Care</span>
         <span class="footer-note">Responsive dashboard for phone and desktop</span>
       </div>
     </section>
   </main>
- 
+
   <script src="./config.js"></script>
   <script src="./app.js"></script>
 </body>
