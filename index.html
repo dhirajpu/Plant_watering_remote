@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plant Watering Remote</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="page">
+    <section class="card">
+      <h1>Plant Watering Remote</h1>
+      <p class="subtitle">Free custom dashboard for your ESP32</p>
+ 
+      <div class="grid">
+        <div class="metric">
+          <span class="label">Moisture</span>
+          <span class="value" id="moisture">--%</span>
+        </div>
+        <div class="metric">
+          <span class="label">Status</span>
+          <span class="value small" id="status">Loading...</span>
+        </div>
+        <div class="metric">
+          <span class="label">Pump</span>
+          <span class="value small" id="pump">--</span>
+        </div>
+        <div class="metric">
+          <span class="label">Fault</span>
+          <span class="value small" id="fault">--</span>
+        </div>
+        <div class="metric">
+          <span class="label">Raw</span>
+          <span class="value small" id="raw">--</span>
+        </div>
+        <div class="metric">
+          <span class="label">ESP32 IP</span>
+          <span class="value small" id="ip">--</span>
+        </div>
+      </div>
+ 
+      <div class="footer">
+        <span id="connection">Waiting for data...</span>
+      </div>
+    </section>
+  </main>
+ 
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
