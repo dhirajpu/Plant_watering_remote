@@ -13,6 +13,36 @@ function setText(id, value) {
   document.getElementById(id).textContent = value;
 }
  
+function formatSeconds(seconds) {
+  if (seconds == null || Number.isNaN(Number(seconds))) {
+    return '--';
+  }
+ 
+  const totalSeconds = Number(seconds);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s ago`;
+  }
+ 
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  return `${minutes}m ${remainingSeconds}s ago`;
+}
+ 
+function formatMinutes(minutes) {
+  if (minutes == null || Number.isNaN(Number(minutes))) {
+    return '--';
+  }
+ 
+  const totalMinutes = Number(minutes);
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min`;
+  }
+ 
+  const hours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+}
+ 
 async function refreshRemoteStatus() {
   const connection = document.getElementById('connection');
  
@@ -31,8 +61,12 @@ async function refreshRemoteStatus() {
     setText('status', data.status ?? '--');
     setText('pump', data.pump ? 'ON' : 'OFF');
     setText('fault', data.fault ? 'YES' : 'NO');
+    setText('sensorHealth', data.sensorHealth ?? '--');
     setText('raw', data.raw ?? '--');
     setText('ip', data.ip ?? '--');
+    setText('targetRange', data.targetRange ?? '--');
+    setText('lastChange', formatSeconds(data.lastChangeSec));
+    setText('uptime', formatMinutes(data.uptimeMin));
  
     connection.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
     connection.className = '';
