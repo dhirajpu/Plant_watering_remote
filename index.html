@@ -11,7 +11,7 @@
     <section class="card">
       <div class="hero">
         <div>
-          <p class="eyebrow">Smart Plant System</p>
+          <p class="eyebrow">Smart Plant Monitor System</p>
           <h1>Plant Life Care</h1>
           <p class="subtitle">Live moisture, pump, and device health in one simple dashboard.</p>
         </div>
@@ -26,11 +26,36 @@
           <span class="label">Moisture Level</span>
           <span class="value large" id="moisture">--%</span>
           <span class="hint">Current soil moisture</span>
+ 
+          <div class="moisture-progress">
+            <div class="progress-track">
+              <div class="progress-fill" id="moistureFill"></div>
+              <div class="progress-marker" id="moistureMarker"></div>
+            </div>
+            <div class="progress-labels">
+              <span class="progress-label" id="labelDry">🌵 Dry</span>
+              <span class="progress-label" id="labelIdeal">🌿 Normal</span>
+              <span class="progress-label" id="labelWet">💧 Wet</span>
+            </div>
+          </div>
         </div>
         <div class="spotlight-card pulse-card">
           <span class="label">Connection</span>
           <span class="value small" id="connection">Waiting for data...</span>
-          <span class="hint">Reading data from system</span>
+          <span class="hint">Updating data from monitoring system</span>
+        </div>
+      </section>
+ 
+      <section class="care-panel">
+        <div class="care-card range-card">
+          <span class="label">Plant Required Moisture</span>
+          <span class="value medium" id="requiredMoisture">50-70%</span>
+          <span class="hint">Healthy target band for this plant</span>
+        </div>
+        <div class="care-card advice-card">
+          <span class="label">Plant Care Advice</span>
+          <span class="value small" id="careAdvice">Waiting for live data...</span>
+          <span class="hint" id="careHint">The recommendation updates from the current moisture level.</span>
         </div>
       </section>
  
@@ -70,7 +95,7 @@
       </div>
  
       <div class="footer">
-        <span class="footer-title">Plant life care</span>
+        <span class="footer-title">Plant Life Care</span>
         <span class="footer-note">Responsive dashboard for phone and desktop</span>
       </div>
     </section>
