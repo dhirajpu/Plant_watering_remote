@@ -1,5 +1,5 @@
 window.PLANT_APP_CONFIG = {
-  firebaseBaseUrl: "https://your-project-default-rtdb.firebaseio.com",
+  firebaseBaseUrl: "https://vernal-catfish-196407.firebaseio.com/",
   devicePath: "/plantMonitor/main",
   authToken: ""
 };
