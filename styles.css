@@ -103,16 +103,23 @@ h1 {
 }
 
 .weather-panel {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 18px;
+}
+
+.camera-panel {
   margin-bottom: 18px;
 }
 
 .weather-card {
-  display: flex;
+  display: inline-flex;
   justify-content: space-between;
   gap: 18px;
   align-items: center;
+  width: min(100%, 380px);
   border-radius: 22px;
-  padding: 18px 20px;
+  padding: 16px 18px;
   border: 1px solid var(--card-border);
   background: linear-gradient(135deg, #eef7ff, #dceeff);
 }
@@ -127,13 +134,72 @@ h1 {
 
 .weather-location {
   color: var(--accent-deep);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .weather-updated {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
+}
+
+.camera-card {
+  border-radius: 22px;
+  padding: 18px 20px;
+  border: 1px solid var(--card-border);
+  background: linear-gradient(135deg, #f7fbff, #eef5ff);
+}
+
+.camera-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.camera-link {
+  color: var(--accent-deep);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.camera-link:hover {
+  text-decoration: underline;
+}
+
+.camera-frame-wrap {
+  position: relative;
+  overflow: hidden;
+  min-height: 240px;
+  border-radius: 18px;
+  border: 1px solid #dbe7f8;
+  background: linear-gradient(180deg, #e8eefb, #dfe8f5);
+}
+
+.camera-frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #dfe8f5;
+}
+
+.camera-placeholder {
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.camera-placeholder code {
+  font-family: Consolas, monospace;
+  color: var(--accent-deep);
 }
 
 .care-panel {
@@ -321,9 +387,14 @@ h1 {
   }
 
   .weather-card,
-  .weather-meta {
+  .weather-meta,
+  .camera-header {
     align-items: flex-start;
     text-align: left;
+  }
+
+  .weather-card {
+    width: 100%;
   }
 
   .grid {
