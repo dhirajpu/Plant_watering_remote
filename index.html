@@ -1,51 +1,132 @@
 <!DOCTYPE html>
+
 <html lang="en">
+
 <head>
+
   <meta charset="UTF-8">
+
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Plant Watering Remote</title>
+
+  <title>Plant life care</title>
+
   <link rel="stylesheet" href="./styles.css">
+
 </head>
+
 <body>
+
   <main class="page">
+
     <section class="card">
-      <h1>Plant Watering Remote</h1>
-      <p class="subtitle">Free custom dashboard for your ESP32</p>
- 
+
+      <div class="hero">
+
+        <div>
+
+          <p class="eyebrow">Smart Plant Monitor</p>
+
+          <h1>Plant life care</h1>
+
+          <p class="subtitle">Live moisture, pump, and device health in one simple dashboard.</p>
+
+        </div>
+
+        <div class="hero-chip">
+
+          <span class="chip-label">Live Status</span>
+
+          <span class="chip-value" id="status">Loading...</span>
+
+        </div>
+
+      </div>
+
+
+
+      <section class="spotlight">
+
+        <div class="spotlight-card moisture-card">
+
+          <span class="label">Moisture Level</span>
+
+          <span class="value large" id="moisture">--%</span>
+
+          <span class="hint">Current soil moisture</span>
+
+        </div>
+
+        <div class="spotlight-card pulse-card">
+
+          <span class="label">Connection</span>
+
+          <span class="value small" id="connection">Waiting for data...</span>
+
+          <span class="hint">GitHub Pages reading from Firebase</span>
+
+        </div>
+
+      </section>
+
+
+
       <div class="grid">
+
         <div class="metric">
-          <span class="label">Moisture</span>
-          <span class="value" id="moisture">--%</span>
-        </div>
-        <div class="metric">
-          <span class="label">Status</span>
-          <span class="value small" id="status">Loading...</span>
-        </div>
-        <div class="metric">
-          <span class="label">Pump</span>
-          <span class="value small" id="pump">--</span>
-        </div>
-        <div class="metric">
-          <span class="label">Fault</span>
-          <span class="value small" id="fault">--</span>
-        </div>
-        <div class="metric">
-          <span class="label">Raw</span>
+
+          <span class="label">Raw Sensor</span>
+
           <span class="value small" id="raw">--</span>
+
         </div>
+
         <div class="metric">
-          <span class="label">ESP32 IP</span>
-          <span class="value small" id="ip">--</span>
+
+          <span class="label">Pump State</span>
+
+          <span class="value small" id="pump">--</span>
+
         </div>
+
+        <div class="metric">
+
+          <span class="label">Sensor Fault</span>
+
+          <span class="value small" id="fault">--</span>
+
+        </div>
+
+        <div class="metric">
+
+          <span class="label">Device IP</span>
+
+          <span class="value small" id="ip">--</span>
+
+        </div>
+
       </div>
- 
+
+
+
       <div class="footer">
-        <span id="connection">Waiting for data...</span>
+
+        <span class="footer-title">Plant life care</span>
+
+        <span class="footer-note">Our Dashboard</span>
+
       </div>
+
     </section>
+
   </main>
- 
+
+
+
   <script src="./config.js"></script>
+
   <script src="./app.js"></script>
+
 </body>
+
 </html>
+
