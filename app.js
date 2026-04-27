@@ -15,12 +15,31 @@ function buildWeatherUrl() {
   return `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&timezone=auto`;
 }
 
-const REMOTE_STALE_MS = 20000;
+const DEFAULT_REMOTE_STALE_MS = 20000;
 let lastRemoteSignature = '';
 let lastRemoteChangeAtMs = 0;
 
+function getRemoteStaleMs() {
+  const timeoutSec = Number(window.PLANT_APP_CONFIG?.staleTimeoutSec);
+  if (Number.isNaN(timeoutSec) || timeoutSec <= 0) {
+    return DEFAULT_REMOTE_STALE_MS;
+  }
+
+  return timeoutSec * 1000;
+}
+
 function setText(id, value) {
   document.getElementById(id).textContent = value;
+}
+
+function setSystemCardState(isOnline) {
+  const card = document.getElementById('systemCard');
+  if (!card) {
+    return;
+  }
+
+  card.classList.remove('system-on', 'system-off');
+  card.classList.add(isOnline ? 'system-on' : 'system-off');
 }
 
 function getWeatherDescription(code) {
@@ -194,23 +213,50 @@ function buildRemoteSignature(data) {
   ].join('|');
 }
 
-function isRemoteDataStale(data) {
+function getRemoteAgeMs(data) {
+  const updatedAtMs = Number(data.updatedAtMs);
+  if (!Number.isNaN(updatedAtMs) && updatedAtMs > 0) {
+    return Math.max(0, Date.now() - updatedAtMs);
+  }
+
+  return NaN;
+}
+
+function getRemoteDataState(data) {
+  const ageMsFromHeartbeat = getRemoteAgeMs(data);
+  if (!Number.isNaN(ageMsFromHeartbeat)) {
+    return {
+      isStale: ageMsFromHeartbeat > getRemoteStaleMs(),
+      ageMs: ageMsFromHeartbeat
+    };
+  }
+
   const nowMs = Date.now();
   const signature = buildRemoteSignature(data);
 
   if (!lastRemoteSignature) {
     lastRemoteSignature = signature;
     lastRemoteChangeAtMs = nowMs;
-    return false;
+    return {
+      isStale: false,
+      ageMs: 0
+    };
   }
 
   if (signature !== lastRemoteSignature) {
     lastRemoteSignature = signature;
     lastRemoteChangeAtMs = nowMs;
-    return false;
+    return {
+      isStale: false,
+      ageMs: 0
+    };
   }
 
-  return nowMs - lastRemoteChangeAtMs > REMOTE_STALE_MS;
+  const ageMsFromSignature = nowMs - lastRemoteChangeAtMs;
+  return {
+    isStale: ageMsFromSignature > getRemoteStaleMs(),
+    ageMs: ageMsFromSignature
+  };
 }
 
 async function refreshWeather() {
@@ -256,7 +302,9 @@ async function refreshRemoteStatus() {
       throw new Error('No device data yet');
     }
 
-    const staleData = isRemoteDataStale(data);
+    const remoteState = getRemoteDataState(data);
+    const staleData = remoteState.isStale;
+    const remoteAgeSec = Math.floor(remoteState.ageMs / 1000);
 
     setText('moisture', `${data.moisture ?? '--'}%`);
     setText('status', staleData ? 'System OFF' : (data.status ?? '--'));
@@ -275,8 +323,19 @@ async function refreshRemoteStatus() {
     setText('careAdvice', advice.title);
     setText('careHint', advice.hint);
 
+    setText('systemPower', staleData ? 'OFF' : 'ON');
+    setText('systemHeartbeat', staleData
+      ? `Last heartbeat ${remoteAgeSec}s ago`
+      : `Last heartbeat ${remoteAgeSec}s ago`);
+    setSystemCardState(!staleData);
+
     if (staleData) {
-      connection.textContent = `System OFF: no update for ${Math.floor((Date.now() - lastRemoteChangeAtMs) / 1000)}s`;
+      setText('careAdvice', 'Monitoring Unavailable');
+      setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
+    }
+
+    if (staleData) {
+      connection.textContent = `System OFF: no update for ${remoteAgeSec}s`;
       connection.className = 'error';
     } else {
       connection.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
@@ -285,6 +344,11 @@ async function refreshRemoteStatus() {
   } catch (error) {
     setText('status', 'System OFF');
     setText('pump', 'OFF');
+    setText('systemPower', 'OFF');
+    setText('systemHeartbeat', 'No heartbeat from device');
+    setSystemCardState(false);
+    setText('careAdvice', 'Monitoring Unavailable');
+    setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
     connection.textContent = `Connection issue: ${error.message}`;
     connection.className = 'error';
   }
