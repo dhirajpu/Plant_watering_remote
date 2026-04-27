@@ -1,5 +1,8 @@
 window.PLANT_APP_CONFIG = {
-  firebaseBaseUrl: "https://vernal-catfish-196407.firebaseio.com/",
+  firebaseBaseUrl: "https://your-project-default-rtdb.firebaseio.com",
   devicePath: "/plantMonitor/main",
-  authToken: ""
+  authToken: "",
+  cameraStreamUrl: "",
+  cameraLabel: "Plant camera",
+  staleTimeoutSec: 20
 };
