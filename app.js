@@ -18,6 +18,8 @@ function buildWeatherUrl() {
 const DEFAULT_REMOTE_STALE_MS = 20000;
 let lastRemoteSignature = '';
 let lastRemoteChangeAtMs = 0;
+const MIN_EPOCH_MS = 1577836800000;
+const MAX_FUTURE_DRIFT_MS = 24 * 60 * 60 * 1000;
 
 function getRemoteStaleMs() {
   const timeoutSec = Number(window.PLANT_APP_CONFIG?.staleTimeoutSec);
@@ -243,11 +245,73 @@ function buildRemoteSignature(data) {
 
 function getRemoteAgeMs(data) {
   const updatedAtMs = Number(data.updatedAtMs);
-  if (!Number.isNaN(updatedAtMs) && updatedAtMs > 0) {
+  const nowMs = Date.now();
+  const looksLikeEpochMs = !Number.isNaN(updatedAtMs)
+    && updatedAtMs >= MIN_EPOCH_MS
+    && updatedAtMs <= nowMs + MAX_FUTURE_DRIFT_MS;
+
+  if (looksLikeEpochMs) {
     return Math.max(0, Date.now() - updatedAtMs);
   }
 
   return NaN;
+}
+
+function renderStaleDataState(remoteAgeSec) {
+  setText('moisture', '--');
+  setText('status', 'System OFF');
+  setText('pump', 'OFF');
+  setText('fault', '--');
+  setText('sensorHealth', '--');
+  setText('raw', '--');
+  setText('ip', '--');
+  setText('targetRange', '--');
+  setText('requiredMoisture', '--');
+  setText('lastChange', '--');
+  setText('uptime', '--');
+  updateMoistureBar(NaN, NaN, NaN, '');
+
+  setText('careAdvice', 'Monitoring Unavailable');
+  setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
+  setText('systemPower', 'OFF');
+  setText('systemHeartbeat', `Last heartbeat ${remoteAgeSec}s ago`);
+
+  setSystemCardState(false);
+  setCareAlertState(true);
+
+  const connection = document.getElementById('connection');
+  if (connection) {
+    connection.textContent = `System OFF: no update for ${remoteAgeSec}s`;
+    connection.className = 'error';
+  }
+}
+
+function renderConnectionErrorState(message) {
+  setText('moisture', '--');
+  setText('status', 'System OFF');
+  setText('pump', 'OFF');
+  setText('fault', '--');
+  setText('sensorHealth', '--');
+  setText('raw', '--');
+  setText('ip', '--');
+  setText('targetRange', '--');
+  setText('requiredMoisture', '--');
+  setText('lastChange', '--');
+  setText('uptime', '--');
+  updateMoistureBar(NaN, NaN, NaN, '');
+
+  setText('systemPower', 'OFF');
+  setText('systemHeartbeat', 'No heartbeat from device');
+  setSystemCardState(false);
+  setCareAlertState(true);
+  setText('careAdvice', 'Monitoring Unavailable');
+  setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
+
+  const connection = document.getElementById('connection');
+  if (connection) {
+    connection.textContent = `Connection issue: ${message}`;
+    connection.className = 'error';
+  }
 }
 
 function getRemoteDataState(data) {
@@ -317,8 +381,6 @@ async function refreshWeather() {
 }
 
 async function refreshRemoteStatus() {
-  const connection = document.getElementById('connection');
-
   try {
     const response = await fetch(buildRemoteUrl(), { cache: 'no-store' });
     if (!response.ok) {
@@ -333,10 +395,16 @@ async function refreshRemoteStatus() {
     const remoteState = getRemoteDataState(data);
     const staleData = remoteState.isStale;
     const remoteAgeSec = Math.floor(remoteState.ageMs / 1000);
+    const waterIssue = Boolean(data.waterIssue);
+
+    if (staleData) {
+      renderStaleDataState(remoteAgeSec);
+      return;
+    }
 
     setText('moisture', `${data.moisture ?? '--'}%`);
-    setText('status', staleData ? 'System OFF' : (data.status ?? '--'));
-    setText('pump', staleData ? 'OFF' : (data.pump ? 'ON' : 'OFF'));
+    setText('status', data.status ?? '--');
+    setText('pump', data.pump ? 'ON' : 'OFF');
     setText('fault', data.fault ? 'YES' : 'NO');
     setText('sensorHealth', data.sensorHealth ?? '--');
     setText('raw', data.raw ?? '--');
@@ -351,34 +419,23 @@ async function refreshRemoteStatus() {
     setText('careAdvice', advice.title);
     setText('careHint', advice.hint);
 
-    setText('systemPower', staleData ? 'OFF' : 'ON');
+    setText('systemPower', 'ON');
     setText('systemHeartbeat', `Last heartbeat ${remoteAgeSec}s ago`);
-    setSystemCardState(!staleData);
-    setCareAlertState(staleData);
+    setSystemCardState(true);
+    setCareAlertState(waterIssue);
 
-    if (staleData) {
-      setText('careAdvice', 'Monitoring Unavailable');
-      setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
+    if (waterIssue) {
+      setText('careAdvice', 'Water Supply Alert');
+      setText('careHint', data.waterIssueMessage || 'Please check water tank level or pipe connection.');
     }
 
-    if (staleData) {
-      connection.textContent = `System OFF: no update for ${remoteAgeSec}s`;
-      connection.className = 'error';
-    } else {
+    const connection = document.getElementById('connection');
+    if (connection) {
       connection.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
       connection.className = '';
     }
   } catch (error) {
-    setText('status', 'System OFF');
-    setText('pump', 'OFF');
-    setText('systemPower', 'OFF');
-    setText('systemHeartbeat', 'No heartbeat from device');
-    setSystemCardState(false);
-    setCareAlertState(true);
-    setText('careAdvice', 'Monitoring Unavailable');
-    setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
-    connection.textContent = `Connection issue: ${error.message}`;
-    connection.className = 'error';
+    renderConnectionErrorState(error.message);
   }
 }
 
