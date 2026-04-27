@@ -108,6 +108,12 @@ h1 {
   margin-bottom: 18px;
 }
 
+.system-panel {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 18px;
+}
+
 .camera-panel {
   margin-bottom: 18px;
 }
@@ -122,6 +128,29 @@ h1 {
   padding: 16px 18px;
   border: 1px solid var(--card-border);
   background: linear-gradient(135deg, #eef7ff, #dceeff);
+}
+
+.system-card {
+  width: min(100%, 380px);
+  border-radius: 22px;
+  padding: 16px 18px;
+  border: 1px solid var(--card-border);
+  background: linear-gradient(135deg, #f2fff9, #e2f8ef);
+}
+
+.system-card.system-on {
+  background: linear-gradient(135deg, #f2fff9, #dcf7eb);
+  border-color: #b7e9d5;
+}
+
+.system-card.system-off {
+  background: linear-gradient(135deg, #fff2f2, #fde1e1);
+  border-color: #f1bcbc;
+}
+
+.system-card.system-off .value,
+.system-card.system-off .hint {
+  color: #b91c1c;
 }
 
 .weather-meta {
@@ -387,6 +416,7 @@ h1 {
   }
 
   .weather-card,
+  .system-card,
   .weather-meta,
   .camera-header {
     align-items: flex-start;
@@ -394,6 +424,10 @@ h1 {
   }
 
   .weather-card {
+    width: 100%;
+  }
+
+  .system-card {
     width: 100%;
   }
 
