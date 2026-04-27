@@ -1,12 +1,11 @@
-//this code is belongs to arduino it's working code with live status on phone
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 
-static const char *WIFI_SSID = "YOUR_WIFI_NAME";
-static const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+static const char *WIFI_SSID = "Airtel_Dhiraj";
+static const char *WIFI_PASSWORD = "Airtel@9798";
 
 static const char *FIREBASE_BASE_URL = "https://vernal-catfish-196407.firebaseio.com/";
 static const char *FIREBASE_DEVICE_PATH = "/plantMonitor/main";
@@ -33,8 +32,11 @@ static const unsigned long STALE_MS = 300000;
 static const unsigned long LOOP_DELAY_MS = 50;
 static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 20000;
 static const unsigned long STARTUP_IP_SHOW_MS = 8000;
+static const unsigned long WATER_CHECK_MIN_PUMP_MS = 12000;
+static const unsigned long WATER_RETRY_MS = 60000;
 static const int CHANGE_DELTA = 5;
 static const int SENSOR_SAMPLES = 12;
+static const int WATER_GAIN_CLEAR_PERCENT = 2;
 
 LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLS, LCD_ROWS);
 WiFiClientSecure secureClient;
@@ -45,11 +47,15 @@ char lastLine2[LCD_COLS + 1] = "";
 int filteredRaw = AIR_RAW;
 int moisturePct = 0;
 int previousRaw = -1;
+int waterCheckStartMoisture = 0;
+
 bool sensorFault = false;
+bool waterSupplyIssue = false;
 bool pumpRunning = false;
 bool lcdNeedsRefresh = true;
 bool wifiConnected = false;
 bool showStartupIp = false;
+
 unsigned long lastMeaningfulChangeMs = 0;
 unsigned long lastSampleMs = 0;
 unsigned long lastRemotePushMs = 0;
@@ -57,6 +63,9 @@ unsigned long lastLcdUpdateMs = 0;
 unsigned long burstStartMs = 0;
 unsigned long currentBurstMs = 0;
 unsigned long startupIpUntilMs = 0;
+unsigned long waterCheckPumpMs = 0;
+unsigned long lastWaterIssueMs = 0;
+
 String deviceIp = "offline";
 
 void relayOn()
@@ -155,6 +164,37 @@ unsigned long getBurstDurationMs(int pct)
   return map(pct, 41, 49, 4500, 3000);
 }
 
+void resetWaterSupplyMonitor()
+{
+  waterCheckPumpMs = 0;
+  waterCheckStartMoisture = moisturePct;
+}
+
+void evaluateWaterSupplyIssue()
+{
+  if (moisturePct >= TARGET_LOW)
+  {
+    waterSupplyIssue = false;
+    resetWaterSupplyMonitor();
+    return;
+  }
+
+  int moistureGain = moisturePct - waterCheckStartMoisture;
+  if (moistureGain >= WATER_GAIN_CLEAR_PERCENT)
+  {
+    waterSupplyIssue = false;
+    resetWaterSupplyMonitor();
+    return;
+  }
+
+  if (!waterSupplyIssue && waterCheckPumpMs >= WATER_CHECK_MIN_PUMP_MS)
+  {
+    waterSupplyIssue = true;
+    lastWaterIssueMs = millis();
+    lcdNeedsRefresh = true;
+  }
+}
+
 void updateSensorState()
 {
   filteredRaw = readFilteredRaw();
@@ -171,12 +211,20 @@ void updateSensorState()
     sensorFault = true;
   }
 
+  evaluateWaterSupplyIssue();
+
   previousRaw = filteredRaw;
 }
 
 void stopPump()
 {
   bool wasRunning = pumpRunning;
+
+  if (wasRunning)
+  {
+    waterCheckPumpMs += millis() - burstStartMs;
+  }
+
   pumpRunning = false;
   currentBurstMs = 0;
   relayOff();
@@ -202,6 +250,12 @@ void startPumpBurst(unsigned long burstMs)
   pumpRunning = true;
   currentBurstMs = burstMs;
   burstStartMs = millis();
+
+  if (waterCheckPumpMs == 0)
+  {
+    waterCheckStartMoisture = moisturePct;
+  }
+
   relayOn();
   lcdNeedsRefresh = true;
 }
@@ -214,8 +268,22 @@ void controlPump()
     return;
   }
 
+  if (waterSupplyIssue)
+  {
+    stopPump();
+
+    if (millis() - lastWaterIssueMs < WATER_RETRY_MS)
+    {
+      return;
+    }
+
+    waterSupplyIssue = false;
+    resetWaterSupplyMonitor();
+  }
+
   if (moisturePct >= TARGET_LOW)
   {
+    resetWaterSupplyMonitor();
     stopPump();
     return;
   }
@@ -237,6 +305,11 @@ String getStatusText()
   if (sensorFault)
   {
     return "Sensor Fault";
+  }
+
+  if (waterSupplyIssue)
+  {
+    return "Check Tank/Pipe";
   }
 
   if (pumpRunning)
@@ -264,7 +337,22 @@ String getSensorHealthText()
     return "Sensor Fault";
   }
 
+  if (waterSupplyIssue)
+  {
+    return "Water Issue";
+  }
+
   return "Ideal";
+}
+
+String getWaterIssueMessage()
+{
+  if (waterSupplyIssue)
+  {
+    return "Please check water tank level or pipe connection.";
+  }
+
+  return "";
 }
 
 unsigned long getLastChangeSeconds()
@@ -323,6 +411,10 @@ void refreshDisplay(bool force)
   if (sensorFault)
   {
     snprintf(line2, sizeof(line2), "Sensor Fault");
+  }
+  else if (waterSupplyIssue)
+  {
+    snprintf(line2, sizeof(line2), "Chk Tank/Pipe");
   }
   else if (pumpRunning)
   {
@@ -384,7 +476,9 @@ String buildRemoteJson()
   json += "\"moisture\":" + String(moisturePct) + ",";
   json += "\"raw\":" + String(filteredRaw) + ",";
   json += "\"pump\":" + String(pumpRunning ? "true" : "false") + ",";
-  json += "\"fault\":" + String(sensorFault ? "true" : "false") + ",";
+  json += "\"fault\":" + String((sensorFault || waterSupplyIssue) ? "true" : "false") + ",";
+  json += "\"waterIssue\":" + String(waterSupplyIssue ? "true" : "false") + ",";
+  json += "\"waterIssueMessage\":\"" + getWaterIssueMessage() + "\",";
   json += "\"sensorHealth\":\"" + getSensorHealthText() + "\",";
   json += "\"status\":\"" + getStatusText() + "\",";
   json += "\"targetLow\":" + String(TARGET_LOW) + ",";
@@ -444,6 +538,7 @@ void setup()
   safeLcdInit();
 
   lastMeaningfulChangeMs = millis();
+  resetWaterSupplyMonitor();
   updateSensorState();
   connectWifi();
   refreshDisplay(true);
@@ -464,7 +559,9 @@ void loop()
     Serial.print("% Pump=");
     Serial.print(pumpRunning ? "ON" : "OFF");
     Serial.print(" Fault=");
-    Serial.print(sensorFault ? "YES" : "NO");
+    Serial.print((sensorFault || waterSupplyIssue) ? "YES" : "NO");
+    Serial.print(" WaterIssue=");
+    Serial.print(waterSupplyIssue ? "YES" : "NO");
     Serial.print(" IP=");
     Serial.println(deviceIp);
   }
