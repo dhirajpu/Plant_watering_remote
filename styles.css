@@ -123,6 +123,33 @@ h1 {
   border-color: #f3c2c2;
 }
 
+.chip-verifying {
+  background: linear-gradient(180deg, #fefce8, #fef9c3);
+  border-color: #fed7aa;
+  animation: chip-verify-pulse 1.5s ease-in-out infinite;
+}
+
+.chip-verifying .chip-value {
+  color: #b45309;
+}
+
+.chip-verifying .chip-hint,
+.chip-verifying .chip-label {
+  color: #b45309;
+}
+
+@keyframes chip-verify-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 rgba(180, 83, 9, 0);
+  }
+  50% {
+    opacity: 0.85;
+    box-shadow: 0 0 0 4px rgba(180, 83, 9, 0.15);
+  }
+}
+
 .system-alert {
   position: sticky;
   top: 10px;
