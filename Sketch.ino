@@ -31,6 +31,7 @@ static const unsigned long REMOTE_PUSH_MS = 5000;
 static const unsigned long STALE_MS = 300000;
 static const unsigned long LOOP_DELAY_MS = 50;
 static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 20000;
+static const unsigned long WIFI_RETRY_MS = 30000;
 static const unsigned long STARTUP_IP_SHOW_MS = 8000;
 static const unsigned long WATER_CHECK_MIN_PUMP_MS = 12000;
 static const unsigned long WATER_RETRY_MS = 60000;
@@ -65,6 +66,7 @@ unsigned long currentBurstMs = 0;
 unsigned long startupIpUntilMs = 0;
 unsigned long waterCheckPumpMs = 0;
 unsigned long lastWaterIssueMs = 0;
+unsigned long lastWifiRetryMs = 0;
 
 String deviceIp = "offline";
 
@@ -440,8 +442,12 @@ void refreshDisplay(bool force)
 
 void connectWifi()
 {
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  lastWifiRetryMs = millis();
 
   unsigned long startMs = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startMs < WIFI_CONNECT_TIMEOUT_MS)
@@ -467,6 +473,62 @@ void connectWifi()
     Serial.println();
     Serial.println("WiFi not connected. Remote sync disabled.");
   }
+}
+
+void updateWifiState(bool connected)
+{
+  if (connected)
+  {
+    deviceIp = WiFi.localIP().toString();
+
+    if (!wifiConnected)
+    {
+      wifiConnected = true;
+      showStartupIp = true;
+      startupIpUntilMs = millis() + STARTUP_IP_SHOW_MS;
+      lcdNeedsRefresh = true;
+      lastLcdUpdateMs = 0;
+      Serial.println();
+      Serial.print("WiFi connected. IP: ");
+      Serial.println(deviceIp);
+    }
+
+    return;
+  }
+
+  if (wifiConnected)
+  {
+    Serial.println();
+    Serial.println("WiFi disconnected. Auto-retry enabled.");
+  }
+
+  wifiConnected = false;
+  deviceIp = "offline";
+  showStartupIp = false;
+  lcdNeedsRefresh = true;
+}
+
+void maintainWifiConnection()
+{
+  wl_status_t status = WiFi.status();
+  bool connected = status == WL_CONNECTED;
+
+  updateWifiState(connected);
+  if (connected)
+  {
+    return;
+  }
+
+  if (millis() - lastWifiRetryMs < WIFI_RETRY_MS)
+  {
+    return;
+  }
+
+  lastWifiRetryMs = millis();
+  Serial.println("Retrying WiFi connection...");
+  WiFi.disconnect();
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
 String buildRemoteJson()
@@ -546,6 +608,8 @@ void setup()
 
 void loop()
 {
+  maintainWifiConnection();
+
   if (millis() - lastSampleMs >= SENSOR_SAMPLE_MS)
   {
     lastSampleMs = millis();
