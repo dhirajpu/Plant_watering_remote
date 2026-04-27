@@ -15,6 +15,10 @@ function buildWeatherUrl() {
   return `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&timezone=auto`;
 }
 
+const REMOTE_STALE_MS = 20000;
+let lastRemoteSignature = '';
+let lastRemoteChangeAtMs = 0;
+
 function setText(id, value) {
   document.getElementById(id).textContent = value;
 }
@@ -177,6 +181,38 @@ function formatMinutes(minutes) {
   return `${hours}h ${remainingMinutes}m`;
 }
 
+function buildRemoteSignature(data) {
+  return [
+    data.updatedAtMs,
+    data.status,
+    data.moisture,
+    data.raw,
+    data.pump,
+    data.lastChangeSec,
+    data.uptimeMin,
+    data.ip
+  ].join('|');
+}
+
+function isRemoteDataStale(data) {
+  const nowMs = Date.now();
+  const signature = buildRemoteSignature(data);
+
+  if (!lastRemoteSignature) {
+    lastRemoteSignature = signature;
+    lastRemoteChangeAtMs = nowMs;
+    return false;
+  }
+
+  if (signature !== lastRemoteSignature) {
+    lastRemoteSignature = signature;
+    lastRemoteChangeAtMs = nowMs;
+    return false;
+  }
+
+  return nowMs - lastRemoteChangeAtMs > REMOTE_STALE_MS;
+}
+
 async function refreshWeather() {
   try {
     const response = await fetch(buildWeatherUrl(), { cache: 'no-store' });
@@ -220,9 +256,11 @@ async function refreshRemoteStatus() {
       throw new Error('No device data yet');
     }
 
+    const staleData = isRemoteDataStale(data);
+
     setText('moisture', `${data.moisture ?? '--'}%`);
-    setText('status', data.status ?? '--');
-    setText('pump', data.pump ? 'ON' : 'OFF');
+    setText('status', staleData ? 'System OFF' : (data.status ?? '--'));
+    setText('pump', staleData ? 'OFF' : (data.pump ? 'ON' : 'OFF'));
     setText('fault', data.fault ? 'YES' : 'NO');
     setText('sensorHealth', data.sensorHealth ?? '--');
     setText('raw', data.raw ?? '--');
@@ -237,9 +275,16 @@ async function refreshRemoteStatus() {
     setText('careAdvice', advice.title);
     setText('careHint', advice.hint);
 
-    connection.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
-    connection.className = '';
+    if (staleData) {
+      connection.textContent = `System OFF: no update for ${Math.floor((Date.now() - lastRemoteChangeAtMs) / 1000)}s`;
+      connection.className = 'error';
+    } else {
+      connection.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+      connection.className = '';
+    }
   } catch (error) {
+    setText('status', 'System OFF');
+    setText('pump', 'OFF');
     connection.textContent = `Connection issue: ${error.message}`;
     connection.className = 'error';
   }
