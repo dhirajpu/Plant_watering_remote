@@ -33,13 +33,36 @@ function setText(id, value) {
 }
 
 function setSystemCardState(isOnline) {
-  const card = document.getElementById('systemCard');
-  if (!card) {
+  const body = document.body;
+  const alert = document.getElementById('systemAlert');
+  const liveChip = document.getElementById('liveStatusChip');
+  const systemChip = document.getElementById('systemStatusChip');
+
+  if (!body) {
     return;
   }
 
-  card.classList.remove('system-on', 'system-off');
-  card.classList.add(isOnline ? 'system-on' : 'system-off');
+  body.classList.toggle('system-off-mode', !isOnline);
+
+  if (alert) {
+    alert.hidden = isOnline;
+  }
+
+  [liveChip, systemChip].forEach((chip) => {
+    if (!chip) {
+      return;
+    }
+    chip.classList.toggle('chip-off', !isOnline);
+  });
+}
+
+function setCareAlertState(isAlert) {
+  const adviceCard = document.getElementById('careAdviceCard');
+  if (!adviceCard) {
+    return;
+  }
+
+  adviceCard.classList.toggle('off-alert', isAlert);
 }
 
 function getWeatherDescription(code) {
@@ -324,10 +347,9 @@ async function refreshRemoteStatus() {
     setText('careHint', advice.hint);
 
     setText('systemPower', staleData ? 'OFF' : 'ON');
-    setText('systemHeartbeat', staleData
-      ? `Last heartbeat ${remoteAgeSec}s ago`
-      : `Last heartbeat ${remoteAgeSec}s ago`);
+    setText('systemHeartbeat', `Last heartbeat ${remoteAgeSec}s ago`);
     setSystemCardState(!staleData);
+    setCareAlertState(staleData);
 
     if (staleData) {
       setText('careAdvice', 'Monitoring Unavailable');
@@ -347,6 +369,7 @@ async function refreshRemoteStatus() {
     setText('systemPower', 'OFF');
     setText('systemHeartbeat', 'No heartbeat from device');
     setSystemCardState(false);
+    setCareAlertState(true);
     setText('careAdvice', 'Monitoring Unavailable');
     setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
     connection.textContent = `Connection issue: ${error.message}`;
