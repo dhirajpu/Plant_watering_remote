@@ -16,10 +16,20 @@
           <h1>Plant Life Care</h1>
           <p class="subtitle">Live moisture, pump, and device health in one simple dashboard.</p>
         </div>
-        <div class="hero-chip">
-          <span class="chip-label">Live Status</span>
-          <span class="chip-value" id="status">Loading...</span>
+        <div class="hero-statuses">
+          <div class="hero-chip" id="liveStatusChip">
+            <span class="chip-label">Live Status</span>
+            <span class="chip-value" id="status">Loading...</span>
+          </div>
+          <div class="hero-chip" id="systemStatusChip">
+            <span class="chip-label">System Status</span>
+            <span class="chip-value" id="systemPower">--</span>
+          </div>
         </div>
+      </div>
+
+      <div class="system-alert" id="systemAlert" hidden>
+        ⚠️ Monitoring system is offline. Please care manually and turn on the device to resume monitoring.
       </div>
 
       <section class="spotlight">
@@ -61,38 +71,13 @@
         </div>
       </section>
 
-      <section class="system-panel">
-        <div class="system-card" id="systemCard">
-          <span class="label">System Status</span>
-          <span class="value medium" id="systemPower">--</span>
-          <span class="hint" id="systemHeartbeat">Waiting for device heartbeat...</span>
-        </div>
-      </section>
-
-      <section class="camera-panel">
-        <div class="camera-card">
-          <div class="camera-header">
-            <div>
-              <span class="label">Live Camera</span>
-              <span class="value small" id="cameraStatus">Coming soon...</span>
-            </div>
-          </div>
-          <div class="camera-frame-wrap">
-            <div class="camera-placeholder" id="cameraPlaceholder">
-              Live plant video preview is coming soon....
-            </div>
-          </div>
-          <span class="hint" id="cameraHint">A future update will show the live camera feed here.</span>
-        </div>
-      </section>
-
       <section class="care-panel">
         <div class="care-card range-card">
           <span class="label">Plant Required Moisture</span>
           <span class="value medium" id="requiredMoisture">50-70%</span>
           <span class="hint">Healthy target band for this plant</span>
         </div>
-        <div class="care-card advice-card">
+        <div class="care-card advice-card" id="careAdviceCard">
           <span class="label">Plant Care Advice</span>
           <span class="value small" id="careAdvice">Waiting for live data...</span>
           <span class="hint" id="careHint">The recommendation updates from the current moisture level.</span>
@@ -133,6 +118,23 @@
           <span class="value small" id="uptime">--</span>
         </div>
       </div>
+
+      <section class="camera-panel">
+        <div class="camera-card">
+          <div class="camera-header">
+            <div>
+              <span class="label">Live Camera</span>
+              <span class="value small" id="cameraStatus">Coming soon...</span>
+            </div>
+          </div>
+          <div class="camera-frame-wrap">
+            <div class="camera-placeholder" id="cameraPlaceholder">
+              Live plant video preview is coming soon....
+            </div>
+          </div>
+          <span class="hint" id="cameraHint">A future update will show the live camera feed here.</span>
+        </div>
+      </section>
 
       <div class="footer">
         <span class="footer-title">Plant Life Care</span>
