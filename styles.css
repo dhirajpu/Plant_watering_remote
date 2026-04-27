@@ -49,9 +49,10 @@ body {
 }
 
 .hero-statuses {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
   gap: 12px;
+  align-self: flex-start;
 }
 
 .eyebrow {
@@ -101,7 +102,19 @@ h1 {
   color: var(--accent-deep);
 }
 
+.chip-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .chip-off .chip-value {
+  color: #b91c1c;
+}
+
+.chip-off .chip-hint,
+.chip-off .chip-label {
   color: #b91c1c;
 }
 
@@ -428,13 +441,23 @@ h1 {
 
 body.system-off-mode {
   background:
-    radial-gradient(circle at top, rgba(220, 38, 38, 0.14), transparent 32%),
-    linear-gradient(180deg, #fff2f2, #ffe6e6);
+    radial-gradient(circle at top, rgba(220, 38, 38, 0.25), transparent 35%),
+    linear-gradient(180deg, #ffe8e8, #ffdede);
 }
 
 body.system-off-mode .card {
-  border-color: #f2c4c4;
-  box-shadow: 0 22px 60px rgba(185, 28, 28, 0.15);
+  background: #fff6f6;
+  border-color: #efbcbc;
+  box-shadow: 0 22px 60px rgba(185, 28, 28, 0.2);
+}
+
+body.system-off-mode .spotlight-card,
+body.system-off-mode .weather-card,
+body.system-off-mode .range-card,
+body.system-off-mode .metric,
+body.system-off-mode .camera-card {
+  background: linear-gradient(135deg, #fff3f3, #ffe8e8);
+  border-color: #efc8c8;
 }
 
 @media (max-width: 780px) {
@@ -453,6 +476,7 @@ body.system-off-mode .card {
 
   .hero-statuses {
     width: 100%;
+    grid-template-columns: 1fr;
   }
 
   .hero-chip,
