@@ -346,6 +346,7 @@ function renderConnectionErrorState(message) {
 
 function getRemoteDataState(data) {
   const ageMsFromHeartbeat = getRemoteAgeMs(data);
+  
   if (!Number.isNaN(ageMsFromHeartbeat)) {
     hasConfirmedLiveRemote = true;
     return {
@@ -361,7 +362,7 @@ function getRemoteDataState(data) {
     lastRemoteSignature = signature;
     lastRemoteChangeAtMs = nowMs;
     return {
-      isStale: true,
+      isStale: !hasConfirmedLiveRemote,
       ageMs: NaN
     };
   }
@@ -421,7 +422,8 @@ async function refreshWeather() {
 
 async function refreshRemoteStatus() {
   try {
-    setVerifyingState(!hasConfirmedLiveRemote);
+    const shouldShowVerifying = !hasConfirmedLiveRemote && !lastRemoteSignature;
+    setVerifyingState(shouldShowVerifying);
 
     const response = await fetch(buildRemoteUrl(), { cache: 'no-store' });
     if (!response.ok) {
