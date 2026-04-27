@@ -4,5 +4,5 @@ window.PLANT_APP_CONFIG = {
   authToken: "",
   cameraStreamUrl: "",
   cameraLabel: "Plant camera",
-  staleTimeoutSec: 3
+  staleTimeoutSec: 10
 };
