@@ -230,6 +230,18 @@ function formatMinutes(minutes) {
   return `${hours}h ${remainingMinutes}m`;
 }
 
+function formatHoursMinutesFromSeconds(seconds) {
+  if (seconds == null || Number.isNaN(Number(seconds))) {
+    return '--';
+  }
+
+  const totalSeconds = Math.max(0, Number(seconds));
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h ${minutes}m`;
+}
+
 function buildRemoteSignature(data) {
   return [
     data.updatedAtMs,
@@ -258,6 +270,8 @@ function getRemoteAgeMs(data) {
 }
 
 function renderStaleDataState(remoteAgeSec) {
+  const staleDuration = formatHoursMinutesFromSeconds(remoteAgeSec);
+
   setText('moisture', '--');
   setText('status', 'System OFF');
   setText('pump', 'OFF');
@@ -274,14 +288,14 @@ function renderStaleDataState(remoteAgeSec) {
   setText('careAdvice', 'Monitoring Unavailable');
   setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
   setText('systemPower', 'OFF');
-  setText('systemHeartbeat', `Last heartbeat ${remoteAgeSec}s ago`);
+  setText('systemHeartbeat', `Last heartbeat ${staleDuration} ago`);
 
   setSystemCardState(false);
   setCareAlertState(true);
 
   const connection = document.getElementById('connection');
   if (connection) {
-    connection.textContent = `System OFF: no update for ${remoteAgeSec}s`;
+    connection.textContent = `System OFF: no update for ${staleDuration}`;
     connection.className = 'error';
   }
 }
