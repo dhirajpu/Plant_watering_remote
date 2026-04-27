@@ -29,7 +29,12 @@ function getRemoteStaleMs() {
 }
 
 function setText(id, value) {
-  document.getElementById(id).textContent = value;
+  const element = document.getElementById(id);
+  if (!element) {
+    return;
+  }
+
+  element.textContent = value;
 }
 
 function setSystemCardState(isOnline) {
