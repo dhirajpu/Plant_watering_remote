@@ -18,6 +18,7 @@ function buildWeatherUrl() {
 const DEFAULT_REMOTE_STALE_MS = 20000;
 let lastRemoteSignature = '';
 let lastRemoteChangeAtMs = 0;
+let hasConfirmedLiveRemote = false;
 const MIN_EPOCH_MS = 1577836800000;
 const MAX_FUTURE_DRIFT_MS = 24 * 60 * 60 * 1000;
 
@@ -44,6 +45,7 @@ function setSystemCardState(isOnline) {
   const alert = document.getElementById('systemAlert');
   const liveChip = document.getElementById('liveStatusChip');
   const systemChip = document.getElementById('systemStatusChip');
+  const verifyingChip = document.getElementById('verifyingChip');
 
   if (!body) {
     return;
@@ -61,6 +63,17 @@ function setSystemCardState(isOnline) {
     }
     chip.classList.toggle('chip-off', !isOnline);
   });
+
+  if (verifyingChip) {
+    verifyingChip.hidden = isOnline;
+  }
+}
+
+function setVerifyingState(isVerifying) {
+  const verifyingChip = document.getElementById('verifyingChip');
+  if (verifyingChip) {
+    verifyingChip.hidden = !isVerifying;
+  }
 }
 
 function setCareAlertState(isAlert) {
@@ -270,7 +283,8 @@ function getRemoteAgeMs(data) {
 }
 
 function renderStaleDataState(remoteAgeSec) {
-  const staleDuration = formatHoursMinutesFromSeconds(remoteAgeSec);
+  const hasKnownAge = Number.isFinite(remoteAgeSec) && remoteAgeSec > 0;
+  const staleDuration = hasKnownAge ? formatHoursMinutesFromSeconds(remoteAgeSec) : null;
 
   setText('moisture', '--');
   setText('status', 'System OFF');
@@ -288,14 +302,16 @@ function renderStaleDataState(remoteAgeSec) {
   setText('careAdvice', 'Monitoring Unavailable');
   setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
   setText('systemPower', 'OFF');
-  setText('systemHeartbeat', `Last heartbeat ${staleDuration} ago`);
+  setText('systemHeartbeat', hasKnownAge ? `Last heartbeat ${staleDuration} ago` : 'Waiting for live update');
 
   setSystemCardState(false);
   setCareAlertState(true);
 
   const connection = document.getElementById('connection');
   if (connection) {
-    connection.textContent = `System OFF: no update for ${staleDuration}`;
+    connection.textContent = hasKnownAge
+      ? `System OFF: no update for ${staleDuration}`
+      : 'System OFF: waiting for live update from device';
     connection.className = 'error';
   }
 }
@@ -331,6 +347,7 @@ function renderConnectionErrorState(message) {
 function getRemoteDataState(data) {
   const ageMsFromHeartbeat = getRemoteAgeMs(data);
   if (!Number.isNaN(ageMsFromHeartbeat)) {
+    hasConfirmedLiveRemote = true;
     return {
       isStale: ageMsFromHeartbeat > getRemoteStaleMs(),
       ageMs: ageMsFromHeartbeat
@@ -344,17 +361,25 @@ function getRemoteDataState(data) {
     lastRemoteSignature = signature;
     lastRemoteChangeAtMs = nowMs;
     return {
-      isStale: false,
-      ageMs: 0
+      isStale: true,
+      ageMs: NaN
     };
   }
 
   if (signature !== lastRemoteSignature) {
     lastRemoteSignature = signature;
     lastRemoteChangeAtMs = nowMs;
+    hasConfirmedLiveRemote = true;
     return {
       isStale: false,
       ageMs: 0
+    };
+  }
+
+  if (!hasConfirmedLiveRemote) {
+    return {
+      isStale: true,
+      ageMs: NaN
     };
   }
 
@@ -396,6 +421,8 @@ async function refreshWeather() {
 
 async function refreshRemoteStatus() {
   try {
+    setVerifyingState(!hasConfirmedLiveRemote);
+
     const response = await fetch(buildRemoteUrl(), { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -413,6 +440,7 @@ async function refreshRemoteStatus() {
 
     if (staleData) {
       renderStaleDataState(remoteAgeSec);
+      setVerifyingState(false);
       return;
     }
 
@@ -436,6 +464,7 @@ async function refreshRemoteStatus() {
     setText('systemPower', 'ON');
     setText('systemHeartbeat', `Last heartbeat ${remoteAgeSec}s ago`);
     setSystemCardState(true);
+    setVerifyingState(false);
     setCareAlertState(waterIssue);
 
     if (waterIssue) {
@@ -449,6 +478,7 @@ async function refreshRemoteStatus() {
       connection.className = '';
     }
   } catch (error) {
+    setVerifyingState(false);
     renderConnectionErrorState(error.message);
   }
 }
