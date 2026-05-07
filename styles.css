@@ -553,3 +553,227 @@ body.system-off-mode .camera-card {
     font-size: 46px;
   }
 }
+
+
+/* ===== DEVICE ROW ===== */
+.device-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.device-chip {
+  flex: 1 1 140px;
+  background: var(--accent-soft);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ===== PLANTS SECTION ===== */
+.plants-section {
+  margin: 22px 0 0;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 14px;
+}
+
+.plants-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.plant-card-placeholder {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--muted);
+  padding: 30px;
+  background: var(--accent-soft);
+  border-radius: 16px;
+  border: 1px dashed var(--card-border);
+}
+
+/* ===== PLANT CARD ===== */
+.plant-card {
+  background: var(--card);
+  border: 2px solid var(--card-border);
+  border-radius: 18px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: box-shadow 0.2s;
+}
+
+.plant-card:hover {
+  box-shadow: 0 6px 24px rgba(15, 118, 110, 0.12);
+}
+
+.plant-card.status-ok     { border-color: #6ee7b7; }
+.plant-card.status-dry    { border-color: #fcd34d; }
+.plant-card.status-wet    { border-color: #93c5fd; }
+.plant-card.status-watering { border-color: #38bdf8; background: #f0faff; }
+.plant-card.status-fault  { border-color: var(--warn); }
+.plant-card.status-water-issue { border-color: #f97316; background: #fff7ed; }
+
+.plant-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.plant-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plant-emoji {
+  font-size: 22px;
+}
+
+.plant-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.plant-status-badge {
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  border-radius: 20px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.status-watering .plant-status-badge {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.status-dry .plant-status-badge {
+  background: #fef9c3;
+  color: #92400e;
+}
+
+.status-fault .plant-status-badge,
+.status-water-issue .plant-status-badge {
+  background: #fee2e2;
+  color: var(--warn);
+}
+
+/* ===== MOISTURE ROW ===== */
+.plant-moisture-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.plant-moisture-value {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.plant-target-range {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ===== MOISTURE BAR ===== */
+.plant-bar-track {
+  position: relative;
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 99px;
+  overflow: visible;
+}
+
+.plant-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.5s ease;
+}
+
+.bar-ok  { background: linear-gradient(90deg, #6ee7b7, #10b981); }
+.bar-dry { background: linear-gradient(90deg, #fde68a, #f59e0b); }
+.bar-wet { background: linear-gradient(90deg, #93c5fd, #3b82f6); }
+
+.plant-bar-marker {
+  position: absolute;
+  top: -3px;
+  width: 14px;
+  height: 14px;
+  background: white;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  transform: translateX(-50%);
+  transition: left 0.5s ease;
+}
+
+.plant-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.bar-label-active {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ===== PLANT METRICS GRID ===== */
+.plant-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.plant-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plant-metric-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.plant-metric-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.value-on  { color: #0284c7; }
+.value-off { color: var(--muted); }
+
+/* ===== PLANT ALERT BANNER ===== */
+.plant-alert {
+  background: #fee2e2;
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 6px 10px;
+  text-align: center;
+}
