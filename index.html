@@ -10,64 +10,63 @@
 <body>
   <main class="page">
     <section class="card">
+
+      <!-- HERO -->
       <div class="hero">
         <div>
           <p class="eyebrow">Smart Plant Monitor System</p>
           <h1>Plant Life Care</h1>
-          <p class="subtitle">Live moisture, pump, and device health in one simple dashboard.</p>
+          <p class="subtitle">Live moisture, valve, and sensor health for all your plants in one dashboard.</p>
         </div>
         <div class="hero-statuses">
-          <div class="hero-chip" id="liveStatusChip">
-            <span class="chip-label">Live Status</span>
-            <span class="chip-value" id="status">Loading...</span>
-          </div>
           <div class="hero-chip" id="systemStatusChip">
             <span class="chip-label">System Status</span>
             <span class="chip-value" id="systemPower">--</span>
             <span class="chip-hint" id="systemHeartbeat">Waiting for heartbeat...</span>
           </div>
+          <div class="hero-chip" id="connectionChip">
+            <span class="chip-label">Connection</span>
+            <span class="chip-value" id="connection">Loading...</span>
+          </div>
           <div class="hero-chip chip-verifying" id="verifyingChip" hidden>
             <span class="chip-label">Verification</span>
-            <span class="chip-value" id="verifyingStatus">Verifying live data…</span>
+            <span class="chip-value">Verifying live data...</span>
             <span class="chip-hint">Please wait...</span>
           </div>
         </div>
       </div>
 
+      <!-- SYSTEM OFFLINE ALERT -->
       <div class="system-alert" id="systemAlert" hidden>
-        ⚠️ Monitoring system is offline. Please care manually and turn on the device to resume monitoring.
+        Monitoring system is offline. Please care for your plants manually and turn on the device to resume monitoring.
       </div>
 
-      <section class="spotlight">
-        <div class="spotlight-card moisture-card">
-          <span class="label">Moisture Level</span>
-          <span class="value large" id="moisture">--%</span>
-          <span class="hint">Current soil moisture</span>
-
-          <div class="moisture-progress">
-            <div class="progress-track">
-              <div class="progress-fill" id="moistureFill"></div>
-              <div class="progress-marker" id="moistureMarker"></div>
-            </div>
-            <div class="progress-labels">
-              <span class="progress-label" id="labelDry">🌵 Dry</span>
-              <span class="progress-label" id="labelIdeal">🌿 Normal</span>
-              <span class="progress-label" id="labelWet">💧 Wet</span>
-            </div>
-          </div>
+      <!-- DEVICE INFO ROW -->
+      <section class="device-row">
+        <div class="device-chip">
+          <span class="label">Device IP</span>
+          <span class="value small" id="ip">--</span>
         </div>
-        <div class="spotlight-card pulse-card">
-          <span class="label">Connection</span>
-          <span class="value small" id="connection">Waiting for data...</span>
-          <span class="hint">Updating data from monitoring system</span>
+        <div class="device-chip">
+          <span class="label">Uptime</span>
+          <span class="value small" id="uptime">--</span>
+        </div>
+        <div class="device-chip">
+          <span class="label">Total Plants</span>
+          <span class="value small" id="totalPlants">--</span>
+        </div>
+        <div class="device-chip">
+          <span class="label">Last Updated</span>
+          <span class="value small" id="lastUpdated">--</span>
         </div>
       </section>
 
+      <!-- WEATHER -->
       <section class="weather-panel">
         <div class="weather-card">
           <div>
             <span class="label">Outside Temperature</span>
-            <span class="value medium" id="outsideTemp">--°C</span>
+            <span class="value medium" id="outsideTemp">--C</span>
             <span class="hint" id="weatherSummary">Fetching live Bangalore weather...</span>
           </div>
           <div class="weather-meta">
@@ -77,75 +76,20 @@
         </div>
       </section>
 
-      <section class="care-panel">
-        <div class="care-card range-card">
-          <span class="label">Plant Required Moisture</span>
-          <span class="value medium" id="requiredMoisture">50-70%</span>
-          <span class="hint">Healthy target band for this plant</span>
-        </div>
-        <div class="care-card advice-card" id="careAdviceCard">
-          <span class="label">Plant Care Advice</span>
-          <span class="value small" id="careAdvice">Waiting for live data...</span>
-          <span class="hint" id="careHint">The recommendation updates from the current moisture level.</span>
+      <!-- PLANTS GRID - dynamically built by app.js -->
+      <section class="plants-section">
+        <h2 class="section-title">All Plants</h2>
+        <div class="plants-grid" id="plantsGrid">
+          <div class="plant-card-placeholder">Loading plant data...</div>
         </div>
       </section>
 
-      <div class="grid">
-        <div class="metric">
-          <span class="label">Raw Sensor</span>
-          <span class="value small" id="raw">--</span>
-        </div>
-        <div class="metric">
-          <span class="label">Pump State</span>
-          <span class="value small" id="pump">--</span>
-        </div>
-        <div class="metric">
-          <span class="label">Sensor Health</span>
-          <span class="value small" id="sensorHealth">--</span>
-        </div>
-        <div class="metric">
-          <span class="label">Fault State</span>
-          <span class="value small" id="fault">--</span>
-        </div>
-        <div class="metric">
-          <span class="label">Device IP</span>
-          <span class="value small" id="ip">--</span>
-        </div>
-        <div class="metric">
-          <span class="label">Target Range</span>
-          <span class="value small" id="targetRange">--</span>
-        </div>
-        <div class="metric">
-          <span class="label">Last Sensor Change</span>
-          <span class="value small" id="lastChange">--</span>
-        </div>
-        <div class="metric">
-          <span class="label">Uptime</span>
-          <span class="value small" id="uptime">--</span>
-        </div>
-      </div>
-
-      <section class="camera-panel">
-        <div class="camera-card">
-          <div class="camera-header">
-            <div>
-              <span class="label">Live Camera</span>
-              <span class="value small" id="cameraStatus">Coming soon...</span>
-            </div>
-          </div>
-          <div class="camera-frame-wrap">
-            <div class="camera-placeholder" id="cameraPlaceholder">
-              Live plant video preview is coming soon....
-            </div>
-          </div>
-          <span class="hint" id="cameraHint">A future update will show the live camera feed here.</span>
-        </div>
-      </section>
-
+      <!-- FOOTER -->
       <div class="footer">
         <span class="footer-title">Plant Life Care</span>
-        <span class="footer-note">Responsive dashboard for phone and desktop</span>
+        <span class="footer-note">Multi-plant dashboard - Responsive for phone and desktop</span>
       </div>
+
     </section>
   </main>
 
