@@ -1,18 +1,12 @@
 function buildRemoteUrl() {
   const config = window.PLANT_APP_CONFIG;
   let url = `${config.firebaseBaseUrl}${config.devicePath}.json`;
-
-  if (config.authToken) {
-    url += `?auth=${encodeURIComponent(config.authToken)}`;
-  }
-
+  if (config.authToken) url += `?auth=${encodeURIComponent(config.authToken)}`;
   return url;
 }
 
 function buildWeatherUrl() {
-  const latitude = 12.9716;
-  const longitude = 77.5946;
-  return `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&timezone=auto`;
+  return `https://api.open-meteo.com/v1/forecast?latitude=12.9716&longitude=77.5946&current=temperature_2m,weather_code&timezone=auto`;
 }
 
 const DEFAULT_REMOTE_STALE_MS = 20000;
@@ -24,398 +18,206 @@ const MAX_FUTURE_DRIFT_MS = 24 * 60 * 60 * 1000;
 
 function getRemoteStaleMs() {
   const timeoutSec = Number(window.PLANT_APP_CONFIG?.staleTimeoutSec);
-  if (Number.isNaN(timeoutSec) || timeoutSec <= 0) {
-    return DEFAULT_REMOTE_STALE_MS;
-  }
-
-  return timeoutSec * 1000;
+  return (Number.isNaN(timeoutSec) || timeoutSec <= 0) ? DEFAULT_REMOTE_STALE_MS : timeoutSec * 1000;
 }
 
 function setText(id, value) {
-  const element = document.getElementById(id);
-  if (!element) {
-    return;
-  }
-
-  element.textContent = value;
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
 }
 
 function setSystemCardState(isOnline) {
   const body = document.body;
   const alert = document.getElementById('systemAlert');
-  const liveChip = document.getElementById('liveStatusChip');
-  const systemChip = document.getElementById('systemStatusChip');
+  const sysChip = document.getElementById('systemStatusChip');
   const verifyingChip = document.getElementById('verifyingChip');
-
-  if (!body) {
-    return;
-  }
-
-  body.classList.toggle('system-off-mode', !isOnline);
-
-  if (alert) {
-    alert.hidden = isOnline;
-  }
-
-  [liveChip, systemChip].forEach((chip) => {
-    if (!chip) {
-      return;
-    }
-    chip.classList.toggle('chip-off', !isOnline);
-  });
-
-  if (verifyingChip) {
-    verifyingChip.hidden = isOnline;
-  }
+  if (body) body.classList.toggle('system-off-mode', !isOnline);
+  if (alert) alert.hidden = isOnline;
+  if (sysChip) sysChip.classList.toggle('chip-off', !isOnline);
+  if (verifyingChip) verifyingChip.hidden = isOnline;
 }
 
 function setVerifyingState(isVerifying) {
-  const verifyingChip = document.getElementById('verifyingChip');
-  if (verifyingChip) {
-    verifyingChip.hidden = !isVerifying;
-  }
-}
-
-function setCareAlertState(isAlert) {
-  const adviceCard = document.getElementById('careAdviceCard');
-  if (!adviceCard) {
-    return;
-  }
-
-  adviceCard.classList.toggle('off-alert', isAlert);
+  const chip = document.getElementById('verifyingChip');
+  if (chip) chip.hidden = !isVerifying;
 }
 
 function getWeatherDescription(code) {
-  const weatherCodes = {
-    0: 'Clear sky',
-    1: 'Mostly clear',
-    2: 'Partly cloudy',
-    3: 'Overcast',
-    45: 'Foggy',
-    48: 'Rime fog',
-    51: 'Light drizzle',
-    53: 'Drizzle',
-    55: 'Dense drizzle',
-    56: 'Freezing drizzle',
-    57: 'Heavy freezing drizzle',
-    61: 'Light rain',
-    63: 'Rainy',
-    65: 'Heavy rain',
-    66: 'Freezing rain',
-    67: 'Heavy freezing rain',
-    71: 'Light snow',
-    73: 'Snow',
-    75: 'Heavy snow',
-    77: 'Snow grains',
-    80: 'Rain showers',
-    81: 'Strong showers',
-    82: 'Heavy showers',
-    85: 'Snow showers',
-    86: 'Heavy snow showers',
-    95: 'Thunderstorm',
-    96: 'Thunderstorm with hail',
-    99: 'Severe thunderstorm'
+  const map = {
+    0:'Clear sky',1:'Mostly clear',2:'Partly cloudy',3:'Overcast',
+    45:'Foggy',51:'Light drizzle',61:'Light rain',63:'Rainy',65:'Heavy rain',
+    80:'Rain showers',95:'Thunderstorm'
   };
-
-  return weatherCodes[code] ?? 'Weather unavailable';
+  return map[code] ?? 'Weather unavailable';
 }
 
-function resolveTargetRange(targetLow, targetHigh, targetRange) {
-  const minTarget = Number(targetLow);
-  const maxTarget = Number(targetHigh);
-
-  if (!Number.isNaN(minTarget) && !Number.isNaN(maxTarget)) {
-    return { minTarget, maxTarget };
-  }
-
-  if (typeof targetRange === 'string') {
-    const match = targetRange.match(/(\d+)\s*-\s*(\d+)/);
-    if (match) {
-      return {
-        minTarget: Number(match[1]),
-        maxTarget: Number(match[2])
-      };
-    }
-  }
-
-  return {
-    minTarget: NaN,
-    maxTarget: NaN
-  };
+function formatSeconds(s) {
+  if (s == null || Number.isNaN(Number(s))) return '--';
+  const t = Number(s);
+  if (t < 60) return `${t}s ago`;
+  const m = Math.floor(t / 60), r = t % 60;
+  return `${m}m ${r}s ago`;
 }
 
-function updateMoistureBar(moisture, targetLow, targetHigh, targetRange) {
-  const fill = document.getElementById('moistureFill');
-  const marker = document.getElementById('moistureMarker');
-  const dryLabel = document.getElementById('labelDry');
-  const idealLabel = document.getElementById('labelIdeal');
-  const wetLabel = document.getElementById('labelWet');
+function formatMinutes(m) {
+  if (m == null || Number.isNaN(Number(m))) return '--';
+  const t = Number(m);
+  if (t < 60) return `${t} min`;
+  const h = Math.floor(t / 60), r = t % 60;
+  return `${h}h ${r}m`;
+}
 
-  if (!fill || !marker || !dryLabel || !idealLabel || !wetLabel) {
+function getMoistureStatus(moisture, targetLow, targetHigh) {
+  const m = Number(moisture), lo = Number(targetLow), hi = Number(targetHigh);
+  if (Number.isNaN(m) || Number.isNaN(lo) || Number.isNaN(hi)) return 'unknown';
+  if (m < lo) return 'dry';
+  if (m > hi) return 'wet';
+  return 'ok';
+}
+
+function getStatusEmoji(status, watering) {
+  if (watering) return '💧';
+  if (status === 'Sensor Fault' || status === 'Fault') return '⚠️';
+  if (status === 'Check Tank' || status === 'Water Issue') return '🚱';
+  if (status === 'Wet' || status === 'wet') return '💦';
+  if (status === 'OK' || status === 'Monitoring') return '✅';
+  if (status === 'Dry' || status === 'Need Water') return '🌵';
+  return '🌱';
+}
+
+function buildPlantCard(plant, index) {
+  const moisture = Number(plant.moisture);
+  const moistureStatus = getMoistureStatus(plant.moisture, plant.targetLow, plant.targetHigh);
+  const isWatering = Boolean(plant.watering);
+  const hasFault = Boolean(plant.fault);
+  const hasWaterIssue = Boolean(plant.waterIssue);
+  const emoji = getStatusEmoji(plant.status, isWatering);
+
+  const statusClass = hasFault ? 'status-fault'
+    : hasWaterIssue ? 'status-water-issue'
+    : isWatering ? 'status-watering'
+    : moistureStatus === 'dry' ? 'status-dry'
+    : moistureStatus === 'wet' ? 'status-wet'
+    : 'status-ok';
+
+  const barPercent = Number.isNaN(moisture) ? 0 : Math.min(100, Math.max(0, moisture));
+  const barClass = moistureStatus === 'dry' ? 'bar-dry' : moistureStatus === 'wet' ? 'bar-wet' : 'bar-ok';
+
+  return `
+    <div class="plant-card ${statusClass}">
+      <div class="plant-card-header">
+        <div class="plant-name-row">
+          <span class="plant-emoji">${emoji}</span>
+          <span class="plant-name">${plant.name ?? `Plant ${index + 1}`}</span>
+        </div>
+        <span class="plant-status-badge">${plant.status ?? '--'}</span>
+      </div>
+
+      <div class="plant-moisture-row">
+        <span class="plant-moisture-value">${Number.isNaN(moisture) ? '--' : moisture}%</span>
+        <span class="plant-target-range">${plant.targetRange ?? '--'}</span>
+      </div>
+
+      <div class="plant-bar-track">
+        <div class="plant-bar-fill ${barClass}" style="width:${barPercent}%"></div>
+        <div class="plant-bar-marker" style="left:${barPercent}%"></div>
+      </div>
+      <div class="plant-bar-labels">
+        <span class="${moistureStatus === 'dry' ? 'bar-label-active' : ''}">Dry</span>
+        <span class="${moistureStatus === 'ok' ? 'bar-label-active' : ''}">Ideal</span>
+        <span class="${moistureStatus === 'wet' ? 'bar-label-active' : ''}">Wet</span>
+      </div>
+
+      <div class="plant-metrics">
+        <div class="plant-metric">
+          <span class="plant-metric-label">Valve</span>
+          <span class="plant-metric-value ${isWatering ? 'value-on' : 'value-off'}">${isWatering ? 'OPEN' : 'CLOSED'}</span>
+        </div>
+        <div class="plant-metric">
+          <span class="plant-metric-label">Sensor</span>
+          <span class="plant-metric-value">${plant.sensorHealth ?? '--'}</span>
+        </div>
+        <div class="plant-metric">
+          <span class="plant-metric-label">Raw</span>
+          <span class="plant-metric-value">${plant.raw ?? '--'}</span>
+        </div>
+        <div class="plant-metric">
+          <span class="plant-metric-label">Changed</span>
+          <span class="plant-metric-value">${formatSeconds(plant.lastChangeSec)}</span>
+        </div>
+      </div>
+
+      ${hasWaterIssue ? `<div class="plant-alert">Water supply issue - check tank or pipe</div>` : ''}
+      ${plant.fault && !hasWaterIssue ? `<div class="plant-alert">Sensor fault detected</div>` : ''}
+    </div>
+  `;
+}
+
+function renderPlants(plants) {
+  const grid = document.getElementById('plantsGrid');
+  if (!grid) return;
+  if (!plants || plants.length === 0) {
+    grid.innerHTML = '<div class="plant-card-placeholder">No plant data available.</div>';
     return;
   }
-
-  const currentMoisture = Number(moisture);
-  const { minTarget, maxTarget } = resolveTargetRange(targetLow, targetHigh, targetRange);
-
-  const safePercent = Number.isNaN(currentMoisture)
-    ? 0
-    : Math.min(100, Math.max(0, currentMoisture));
-
-  fill.style.width = `${safePercent}%`;
-  marker.style.left = `${safePercent}%`;
-
-  dryLabel.classList.remove('active');
-  idealLabel.classList.remove('active');
-  wetLabel.classList.remove('active');
-
-  if (Number.isNaN(currentMoisture) || Number.isNaN(minTarget) || Number.isNaN(maxTarget)) {
-    return;
-  }
-
-  if (currentMoisture < minTarget) {
-    dryLabel.classList.add('active');
-  } else if (currentMoisture > maxTarget) {
-    wetLabel.classList.add('active');
-  } else {
-    idealLabel.classList.add('active');
-  }
+  grid.innerHTML = plants.map((p, i) => buildPlantCard(p, i)).join('');
 }
 
-function getCareAdvice(moisture, targetLow, targetHigh, targetRange) {
-  const currentMoisture = Number(moisture);
-  const { minTarget, maxTarget } = resolveTargetRange(targetLow, targetHigh, targetRange);
-
-  if ([currentMoisture, minTarget, maxTarget].some((value) => Number.isNaN(value))) {
-    return {
-      title: 'Waiting for data...',
-      hint: 'Live care guidance will appear when the device sends valid values.'
-    };
-  }
-
-  if (currentMoisture < minTarget) {
-    return {
-      title: 'Needs watering',
-      hint: `Moisture is below the ideal ${minTarget}-${maxTarget}% range.`
-    };
-  }
-
-  if (currentMoisture > maxTarget) {
-    return {
-      title: 'Too wet now',
-      hint: `Moisture is above the ideal ${minTarget}-${maxTarget}% range. Let soil dry a bit.`
-    };
-  }
-
-  return {
-    title: 'Plant is in ideal range',
-    hint: `Current moisture is healthy for the ${minTarget}-${maxTarget}% target band.`
-  };
-}
-
-function formatSeconds(seconds) {
-  if (seconds == null || Number.isNaN(Number(seconds))) {
-    return '--';
-  }
-
-  const totalSeconds = Number(seconds);
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s ago`;
-  }
-
-  const minutes = Math.floor(totalSeconds / 60);
-  const remainingSeconds = totalSeconds % 60;
-  return `${minutes}m ${remainingSeconds}s ago`;
-}
-
-function formatMinutes(minutes) {
-  if (minutes == null || Number.isNaN(Number(minutes))) {
-    return '--';
-  }
-
-  const totalMinutes = Number(minutes);
-  if (totalMinutes < 60) {
-    return `${totalMinutes} min`;
-  }
-
-  const hours = Math.floor(totalMinutes / 60);
-  const remainingMinutes = totalMinutes % 60;
-  return `${hours}h ${remainingMinutes}m`;
-}
-
-function formatHoursMinutesFromSeconds(seconds) {
-  if (seconds == null || Number.isNaN(Number(seconds))) {
-    return '--';
-  }
-
-  const totalSeconds = Math.max(0, Number(seconds));
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${hours}h ${minutes}m`;
+function renderOfflinePlants() {
+  const grid = document.getElementById('plantsGrid');
+  if (grid) grid.innerHTML = '<div class="plant-card-placeholder">System offline. Waiting for device...</div>';
 }
 
 function buildRemoteSignature(data) {
-  return [
-    data.updatedAtMs,
-    data.status,
-    data.moisture,
-    data.raw,
-    data.pump,
-    data.lastChangeSec,
-    data.uptimeMin,
-    data.ip
-  ].join('|');
+  const plants = data.plants ?? [];
+  return [data.updatedAtMs, plants.map(p => `${p.moisture}|${p.watering}|${p.status}`).join(',')].join('|');
 }
 
 function getRemoteAgeMs(data) {
   const updatedAtMs = Number(data.updatedAtMs);
   const nowMs = Date.now();
-  const looksLikeEpochMs = !Number.isNaN(updatedAtMs)
-    && updatedAtMs >= MIN_EPOCH_MS
-    && updatedAtMs <= nowMs + MAX_FUTURE_DRIFT_MS;
-
-  if (looksLikeEpochMs) {
-    return Math.max(0, Date.now() - updatedAtMs);
-  }
-
-  return NaN;
-}
-
-function renderStaleDataState(remoteAgeSec) {
-  const hasKnownAge = Number.isFinite(remoteAgeSec) && remoteAgeSec > 0;
-  const staleDuration = hasKnownAge ? formatHoursMinutesFromSeconds(remoteAgeSec) : null;
-
-  setText('moisture', '--');
-  setText('status', 'System OFF');
-  setText('pump', 'OFF');
-  setText('fault', '--');
-  setText('sensorHealth', '--');
-  setText('raw', '--');
-  setText('ip', '--');
-  setText('targetRange', '--');
-  setText('requiredMoisture', '--');
-  setText('lastChange', '--');
-  setText('uptime', '--');
-  updateMoistureBar(NaN, NaN, NaN, '');
-
-  setText('careAdvice', 'Monitoring Unavailable');
-  setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
-  setText('systemPower', 'OFF');
-  setText('systemHeartbeat', hasKnownAge ? `Last heartbeat ${staleDuration} ago` : 'Waiting for live update');
-
-  setSystemCardState(false);
-  setCareAlertState(true);
-
-  const connection = document.getElementById('connection');
-  if (connection) {
-    connection.textContent = hasKnownAge
-      ? `System OFF: no update for ${staleDuration}`
-      : 'System OFF: waiting for live update from device';
-    connection.className = 'error';
-  }
-}
-
-function renderConnectionErrorState(message) {
-  setText('moisture', '--');
-  setText('status', 'System OFF');
-  setText('pump', 'OFF');
-  setText('fault', '--');
-  setText('sensorHealth', '--');
-  setText('raw', '--');
-  setText('ip', '--');
-  setText('targetRange', '--');
-  setText('requiredMoisture', '--');
-  setText('lastChange', '--');
-  setText('uptime', '--');
-  updateMoistureBar(NaN, NaN, NaN, '');
-
-  setText('systemPower', 'OFF');
-  setText('systemHeartbeat', 'No heartbeat from device');
-  setSystemCardState(false);
-  setCareAlertState(true);
-  setText('careAdvice', 'Monitoring Unavailable');
-  setText('careHint', 'The monitoring system is currently offline. Please provide manual care, or restart the system to resume automated monitoring.');
-
-  const connection = document.getElementById('connection');
-  if (connection) {
-    connection.textContent = `Connection issue: ${message}`;
-    connection.className = 'error';
-  }
+  const valid = !Number.isNaN(updatedAtMs) && updatedAtMs >= MIN_EPOCH_MS && updatedAtMs <= nowMs + MAX_FUTURE_DRIFT_MS;
+  return valid ? Math.max(0, nowMs - updatedAtMs) : NaN;
 }
 
 function getRemoteDataState(data) {
   const ageMsFromHeartbeat = getRemoteAgeMs(data);
-  
   if (!Number.isNaN(ageMsFromHeartbeat)) {
     hasConfirmedLiveRemote = true;
-    return {
-      isStale: ageMsFromHeartbeat > getRemoteStaleMs(),
-      ageMs: ageMsFromHeartbeat
-    };
+    return { isStale: ageMsFromHeartbeat > getRemoteStaleMs(), ageMs: ageMsFromHeartbeat };
   }
-
   const nowMs = Date.now();
   const signature = buildRemoteSignature(data);
-
   if (!lastRemoteSignature) {
     lastRemoteSignature = signature;
     lastRemoteChangeAtMs = nowMs;
-    return {
-      isStale: !hasConfirmedLiveRemote,
-      ageMs: NaN
-    };
+    return { isStale: !hasConfirmedLiveRemote, ageMs: NaN };
   }
-
   if (signature !== lastRemoteSignature) {
     lastRemoteSignature = signature;
     lastRemoteChangeAtMs = nowMs;
     hasConfirmedLiveRemote = true;
-    return {
-      isStale: false,
-      ageMs: 0
-    };
+    return { isStale: false, ageMs: 0 };
   }
-
-  if (!hasConfirmedLiveRemote) {
-    return {
-      isStale: true,
-      ageMs: NaN
-    };
-  }
-
+  if (!hasConfirmedLiveRemote) return { isStale: true, ageMs: NaN };
   const ageMsFromSignature = nowMs - lastRemoteChangeAtMs;
-  return {
-    isStale: ageMsFromSignature > getRemoteStaleMs(),
-    ageMs: ageMsFromSignature
-  };
+  return { isStale: ageMsFromSignature > getRemoteStaleMs(), ageMs: ageMsFromSignature };
 }
 
 async function refreshWeather() {
   try {
     const response = await fetch(buildWeatherUrl(), { cache: 'no-store' });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    const currentWeather = data?.current;
-
-    if (!currentWeather) {
-      throw new Error('No weather data');
-    }
-
-    const temperature = Number(currentWeather.temperature_2m);
-    const description = getWeatherDescription(currentWeather.weather_code);
-
-    setText('outsideTemp', Number.isNaN(temperature) ? '--°C' : `${Math.round(temperature)}°C`);
-    setText('weatherSummary', description);
-    setText('weatherLocation', 'Bangalore, India');
+    const curr = data?.current;
+    if (!curr) throw new Error('No weather data');
+    const temp = Number(curr.temperature_2m);
+    setText('outsideTemp', Number.isNaN(temp) ? '--C' : `${Math.round(temp)}C`);
+    setText('weatherSummary', getWeatherDescription(curr.weather_code));
     setText('weatherUpdated', `Updated: ${new Date().toLocaleTimeString()}`);
-  } catch (error) {
-    setText('outsideTemp', '--°C');
-    setText('weatherSummary', `Weather unavailable: ${error.message}`);
-    setText('weatherLocation', 'Bangalore, India');
+  } catch (e) {
+    setText('outsideTemp', '--C');
+    setText('weatherSummary', `Weather unavailable: ${e.message}`);
     setText('weatherUpdated', 'Weather update failed');
   }
 }
@@ -426,62 +228,54 @@ async function refreshRemoteStatus() {
     setVerifyingState(shouldShowVerifying);
 
     const response = await fetch(buildRemoteUrl(), { cache: 'no-store' });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    if (!data) {
-      throw new Error('No device data yet');
-    }
+    if (!data) throw new Error('No device data yet');
 
     const remoteState = getRemoteDataState(data);
-    const staleData = remoteState.isStale;
-    const remoteAgeSec = Math.floor(remoteState.ageMs / 1000);
-    const waterIssue = Boolean(data.waterIssue);
+    const stale = remoteState.isStale;
+    const ageSec = Math.floor(remoteState.ageMs / 1000);
 
-    if (staleData) {
-      renderStaleDataState(remoteAgeSec);
+    if (stale) {
+      setText('systemPower', 'OFF');
+      setText('systemHeartbeat', Number.isFinite(ageSec) ? `Last heartbeat ${ageSec}s ago` : 'Waiting for live update');
+      setText('connection', 'System offline');
+      setSystemCardState(false);
+      renderOfflinePlants();
       setVerifyingState(false);
       return;
     }
 
-    setText('moisture', `${data.moisture ?? '--'}%`);
-    setText('status', data.status ?? '--');
-    setText('pump', data.pump ? 'ON' : 'OFF');
-    setText('fault', data.fault ? 'YES' : 'NO');
-    setText('sensorHealth', data.sensorHealth ?? '--');
-    setText('raw', data.raw ?? '--');
+    // Device info
     setText('ip', data.ip ?? '--');
-    setText('targetRange', data.targetRange ?? '--');
-    setText('requiredMoisture', data.targetRange ?? '--');
-    setText('lastChange', formatSeconds(data.lastChangeSec));
     setText('uptime', formatMinutes(data.uptimeMin));
-    updateMoistureBar(data.moisture, data.targetLow, data.targetHigh, data.targetRange);
-
-    const advice = getCareAdvice(data.moisture, data.targetLow, data.targetHigh, data.targetRange);
-    setText('careAdvice', advice.title);
-    setText('careHint', advice.hint);
-
+    setText('totalPlants', data.totalPlants ?? (data.plants?.length ?? '--'));
+    setText('lastUpdated', new Date().toLocaleTimeString());
     setText('systemPower', 'ON');
-    setText('systemHeartbeat', `Last heartbeat ${remoteAgeSec}s ago`);
+    setText('systemHeartbeat', `Last heartbeat ${ageSec}s ago`);
     setSystemCardState(true);
     setVerifyingState(false);
-    setCareAlertState(waterIssue);
-
-    if (waterIssue) {
-      setText('careAdvice', 'Water Supply Alert');
-      setText('careHint', data.waterIssueMessage || 'Please check water tank level or pipe connection.');
-    }
 
     const connection = document.getElementById('connection');
     if (connection) {
       connection.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
       connection.className = '';
     }
-  } catch (error) {
+
+    // Render per-plant cards
+    renderPlants(data.plants ?? []);
+
+  } catch (e) {
     setVerifyingState(false);
-    renderConnectionErrorState(error.message);
+    setText('systemPower', 'OFF');
+    setText('systemHeartbeat', 'No heartbeat from device');
+    setSystemCardState(false);
+    renderOfflinePlants();
+    const connection = document.getElementById('connection');
+    if (connection) {
+      connection.textContent = `Connection issue: ${e.message}`;
+      connection.className = 'error';
+    }
   }
 }
 
