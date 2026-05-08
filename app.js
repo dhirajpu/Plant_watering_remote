@@ -1,780 +1,311 @@
-:root {
-  color-scheme: light;
-  --bg: #f4fbf7;
-  --card: #ffffff;
-  --text: #1f2937;
-  --muted: #6b7280;
-  --accent: #0f766e;
-  --accent-soft: #dff7ee;
-  --accent-deep: #0b5f59;
-  --card-border: #d7efe5;
-  --warn: #b91c1c;
+function buildRemoteUrl() {
+  const config = window.PLANT_APP_CONFIG;
+  let url = `${config.firebaseBaseUrl}${config.devicePath}.json`;
+  if (config.authToken) url += `?auth=${encodeURIComponent(config.authToken)}`;
+  return url;
 }
 
-* {
-  box-sizing: border-box;
+function buildWeatherUrl() {
+  return `https://api.open-meteo.com/v1/forecast?latitude=12.9716&longitude=77.5946&current=temperature_2m,weather_code&timezone=auto`;
 }
 
-body {
-  margin: 0;
-  font-family: Inter, Arial, sans-serif;
-  background:
-    radial-gradient(circle at top, rgba(16, 185, 129, 0.12), transparent 30%),
-    linear-gradient(180deg, var(--bg), #e7f7ef);
-  color: var(--text);
+const DEFAULT_REMOTE_STALE_MS = 20000;
+let lastRemoteSignature = '';
+let lastRemoteChangeAtMs = 0;
+let hasConfirmedLiveRemote = false;
+const MIN_EPOCH_MS = 1577836800000;
+const MAX_FUTURE_DRIFT_MS = 24 * 60 * 60 * 1000;
+
+function getRemoteStaleMs() {
+  const timeoutSec = Number(window.PLANT_APP_CONFIG?.staleTimeoutSec);
+  return (Number.isNaN(timeoutSec) || timeoutSec <= 0) ? DEFAULT_REMOTE_STALE_MS : timeoutSec * 1000;
 }
 
-.page {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 22px;
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
 }
 
-.card {
-  width: min(100%, 880px);
-  background: var(--card);
-  border-radius: 28px;
-  padding: 26px;
-  border: 1px solid var(--card-border);
-  box-shadow: 0 22px 60px rgba(15, 118, 110, 0.12);
+function setSystemCardState(isOnline) {
+  const body = document.body;
+  const alert = document.getElementById('systemAlert');
+  const sysChip = document.getElementById('systemStatusChip');
+  const verifyingChip = document.getElementById('verifyingChip');
+  if (body) body.classList.toggle('system-off-mode', !isOnline);
+  if (alert) alert.hidden = isOnline;
+  if (sysChip) sysChip.classList.toggle('chip-off', !isOnline);
+  if (verifyingChip) verifyingChip.hidden = isOnline;
 }
 
-.hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  align-items: flex-start;
-  margin-bottom: 22px;
+function setVerifyingState(isVerifying) {
+  const chip = document.getElementById('verifyingChip');
+  if (chip) chip.hidden = !isVerifying;
 }
 
-.hero-statuses {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 12px;
-  align-self: flex-start;
+function getWeatherDescription(code) {
+  const map = {
+    0:'Clear sky',1:'Mostly clear',2:'Partly cloudy',3:'Overcast',
+    45:'Foggy',51:'Light drizzle',61:'Light rain',63:'Rainy',65:'Heavy rain',
+    80:'Rain showers',95:'Thunderstorm'
+  };
+  return map[code] ?? 'Weather unavailable';
 }
 
-.eyebrow {
-  margin: 0 0 8px;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+function formatSeconds(s) {
+  if (s == null || Number.isNaN(Number(s))) return '--';
+  const t = Number(s);
+  if (t < 60) return `${t}s ago`;
+  const m = Math.floor(t / 60), r = t % 60;
+  return `${m}m ${r}s ago`;
 }
 
-h1 {
-  margin: 0;
-  font-size: 36px;
-  line-height: 1.05;
+function formatMinutes(m) {
+  if (m == null || Number.isNaN(Number(m))) return '--';
+  const t = Number(m);
+  if (t < 60) return `${t} min`;
+  const h = Math.floor(t / 60), r = t % 60;
+  return `${h}h ${r}m`;
 }
 
-.subtitle {
-  max-width: 520px;
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 16px;
-  line-height: 1.5;
+function getMoistureStatus(moisture, targetLow, targetHigh) {
+  const m = Number(moisture), lo = Number(targetLow), hi = Number(targetHigh);
+  if (Number.isNaN(m) || Number.isNaN(lo) || Number.isNaN(hi)) return 'unknown';
+  if (m < lo) return 'dry';
+  if (m > hi) return 'wet';
+  return 'ok';
 }
 
-.hero-chip {
-  min-width: 180px;
-  background: linear-gradient(180deg, #f1fffb, #dff7ee);
-  border: 1px solid var(--card-border);
-  border-radius: 20px;
-  padding: 16px 18px;
+function getStatusEmoji(status, watering) {
+  if (watering) return '💧';
+  if (status === 'Sensor Fault' || status === 'Fault') return '⚠️';
+  if (status === 'Check Tank' || status === 'Water Issue') return '🚱';
+  if (status === 'Wet' || status === 'wet') return '💦';
+  if (status === 'OK' || status === 'Monitoring') return '✅';
+  if (status === 'Dry' || status === 'Need Water') return '🌵';
+  return '🌱';
 }
 
-.chip-label {
-  display: block;
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+function getFaultReason(plant) {
+  const reason = typeof plant.sensorFaultReason === 'string' ? plant.sensorFaultReason.trim() : '';
+  if (reason && reason !== 'None') return reason;
+  if (plant.waterIssue) return 'Water supply issue';
+  if (plant.fault) return 'Sensor fault detected';
+  return 'None';
 }
 
-.chip-value {
-  display: block;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--accent-deep);
+function buildPlantCard(plant, index) {
+  const moisture = Number(plant.moisture);
+  const moistureStatus = getMoistureStatus(plant.moisture, plant.targetLow, plant.targetHigh);
+  const isWatering = Boolean(plant.watering);
+  const hasFault = Boolean(plant.fault);
+  const hasWaterIssue = Boolean(plant.waterIssue);
+  const pumpState = isWatering ? 'ON' : 'OFF';
+  const valveState = isWatering ? 'OPEN' : 'CLOSED';
+  const faultReason = getFaultReason(plant);
+  const emoji = getStatusEmoji(plant.status, isWatering);
+
+  const statusClass = hasFault ? 'status-fault'
+    : hasWaterIssue ? 'status-water-issue'
+    : isWatering ? 'status-watering'
+    : moistureStatus === 'dry' ? 'status-dry'
+    : moistureStatus === 'wet' ? 'status-wet'
+    : 'status-ok';
+
+  const barPercent = Number.isNaN(moisture) ? 0 : Math.min(100, Math.max(0, moisture));
+  const barClass = moistureStatus === 'dry' ? 'bar-dry' : moistureStatus === 'wet' ? 'bar-wet' : 'bar-ok';
+
+  return `
+    <div class="plant-card ${statusClass}">
+      <div class="plant-card-header">
+        <div class="plant-name-row">
+          <span class="plant-emoji">${emoji}</span>
+          <span class="plant-name">${plant.name ?? `Plant ${index + 1}`}</span>
+        </div>
+        <span class="plant-status-badge">${plant.status ?? '--'}</span>
+      </div>
+
+      <div class="plant-moisture-row">
+        <span class="plant-moisture-value">${Number.isNaN(moisture) ? '--' : moisture}%</span>
+        <span class="plant-target-range">${plant.targetRange ?? '--'}</span>
+      </div>
+
+      <div class="plant-bar-track">
+        <div class="plant-bar-fill ${barClass}" style="width:${barPercent}%"></div>
+        <div class="plant-bar-marker" style="left:${barPercent}%"></div>
+      </div>
+      <div class="plant-bar-labels">
+        <span class="${moistureStatus === 'dry' ? 'bar-label-active' : ''}">Dry</span>
+        <span class="${moistureStatus === 'ok' ? 'bar-label-active' : ''}">Ideal</span>
+        <span class="${moistureStatus === 'wet' ? 'bar-label-active' : ''}">Wet</span>
+      </div>
+
+      <div class="plant-metrics">
+        <div class="plant-metric">
+          <span class="plant-metric-label">Pump</span>
+          <span class="plant-metric-value ${isWatering ? 'value-on' : 'value-off'}">${pumpState}</span>
+        </div>
+        <div class="plant-metric">
+          <span class="plant-metric-label">Valve</span>
+          <span class="plant-metric-value ${isWatering ? 'value-on' : 'value-off'}">${valveState}</span>
+        </div>
+        <div class="plant-metric">
+          <span class="plant-metric-label">Sensor</span>
+          <span class="plant-metric-value">${plant.sensorHealth ?? '--'}</span>
+        </div>
+        <div class="plant-metric">
+          <span class="plant-metric-label">Fault Reason</span>
+          <span class="plant-metric-value ${faultReason !== 'None' ? 'value-warn' : ''}">${faultReason}</span>
+        </div>
+        <div class="plant-metric">
+          <span class="plant-metric-label">Raw</span>
+          <span class="plant-metric-value">${plant.raw ?? '--'}</span>
+        </div>
+        <div class="plant-metric">
+          <span class="plant-metric-label">Changed</span>
+          <span class="plant-metric-value">${formatSeconds(plant.lastChangeSec)}</span>
+        </div>
+      </div>
+
+      ${hasWaterIssue ? `<div class="plant-alert">Water supply issue - check tank or pipe</div>` : ''}
+      ${plant.fault && !hasWaterIssue ? `<div class="plant-alert">Sensor fault: ${faultReason}</div>` : ''}
+    </div>
+  `;
 }
 
-.chip-hint {
-  display: block;
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.chip-off .chip-value {
-  color: #b91c1c;
-}
-
-.chip-off .chip-hint,
-.chip-off .chip-label {
-  color: #b91c1c;
-}
-
-.chip-off {
-  background: linear-gradient(180deg, #fff5f5, #ffe1e1);
-  border-color: #f3c2c2;
-}
-
-.chip-verifying {
-  background: linear-gradient(180deg, #fefce8, #fef9c3);
-  border-color: #fed7aa;
-  animation: chip-verify-pulse 1.5s ease-in-out infinite;
-}
-
-.chip-verifying .chip-value {
-  color: #b45309;
-}
-
-.chip-verifying .chip-hint,
-.chip-verifying .chip-label {
-  color: #b45309;
-}
-
-@keyframes chip-verify-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    box-shadow: 0 0 0 rgba(180, 83, 9, 0);
+function renderPlants(plants) {
+  const grid = document.getElementById('plantsGrid');
+  if (!grid) return;
+  if (!plants || plants.length === 0) {
+    grid.innerHTML = '<div class="plant-card-placeholder">No plant data available.</div>';
+    return;
   }
-  50% {
-    opacity: 0.85;
-    box-shadow: 0 0 0 4px rgba(180, 83, 9, 0.15);
+  grid.innerHTML = plants.map((p, i) => buildPlantCard(p, i)).join('');
+}
+
+function renderOfflinePlants() {
+  const grid = document.getElementById('plantsGrid');
+  if (grid) grid.innerHTML = '<div class="plant-card-placeholder">System offline. Waiting for device...</div>';
+}
+
+function buildRemoteSignature(data) {
+  const plants = data.plants ?? [];
+  return [data.updatedAtMs, plants.map(p => `${p.moisture}|${p.watering}|${p.status}`).join(',')].join('|');
+}
+
+function getRemoteAgeMs(data) {
+  const updatedAtMs = Number(data.updatedAtMs);
+  const nowMs = Date.now();
+  const valid = !Number.isNaN(updatedAtMs) && updatedAtMs >= MIN_EPOCH_MS && updatedAtMs <= nowMs + MAX_FUTURE_DRIFT_MS;
+  return valid ? Math.max(0, nowMs - updatedAtMs) : NaN;
+}
+
+function getRemoteDataState(data) {
+  const ageMsFromHeartbeat = getRemoteAgeMs(data);
+  if (!Number.isNaN(ageMsFromHeartbeat)) {
+    hasConfirmedLiveRemote = true;
+    return { isStale: ageMsFromHeartbeat > getRemoteStaleMs(), ageMs: ageMsFromHeartbeat };
   }
-}
-
-.system-alert {
-  position: sticky;
-  top: 10px;
-  z-index: 50;
-  margin-bottom: 18px;
-  padding: 14px 16px;
-  border-radius: 14px;
-  border: 1px solid #ef9a9a;
-  background: #ffe8e8;
-  color: #b91c1c;
-  font-weight: 700;
-  box-shadow: 0 8px 18px rgba(185, 28, 28, 0.15);
-}
-
-.spotlight {
-  display: grid;
-  grid-template-columns: 1.2fr 1fr;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.weather-panel {
-  display: flex;
-  justify-content: flex-start;
-  margin-bottom: 18px;
-}
-
-.camera-panel {
-  margin-bottom: 18px;
-}
-
-.weather-card {
-  display: inline-flex;
-  justify-content: space-between;
-  gap: 18px;
-  align-items: center;
-  width: min(100%, 380px);
-  border-radius: 22px;
-  padding: 16px 18px;
-  border: 1px solid var(--card-border);
-  background: linear-gradient(135deg, #eef7ff, #dceeff);
-}
-
-.weather-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-end;
-  text-align: right;
-}
-
-.weather-location {
-  color: var(--accent-deep);
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.weather-updated {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.camera-card {
-  border-radius: 22px;
-  padding: 18px 20px;
-  border: 1px solid var(--card-border);
-  background: linear-gradient(135deg, #f7fbff, #eef5ff);
-}
-
-.camera-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  margin-bottom: 14px;
-}
-
-.camera-link {
-  color: var(--accent-deep);
-  font-size: 14px;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.camera-link:hover {
-  text-decoration: underline;
-}
-
-.camera-frame-wrap {
-  position: relative;
-  overflow: hidden;
-  min-height: 240px;
-  border-radius: 18px;
-  border: 1px solid #dbe7f8;
-  background: linear-gradient(180deg, #e8eefb, #dfe8f5);
-}
-
-.camera-frame {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  background: #dfe8f5;
-}
-
-.camera-placeholder {
-  min-height: 240px;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  text-align: center;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.camera-placeholder code {
-  font-family: Consolas, monospace;
-  color: var(--accent-deep);
-}
-
-.care-panel {
-  display: grid;
-  grid-template-columns: 1fr 1.3fr;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.care-card {
-  border-radius: 22px;
-  padding: 18px 20px;
-  border: 1px solid var(--card-border);
-}
-
-.range-card {
-  background: linear-gradient(135deg, #f1fffb, #ddf7ec);
-}
-
-.advice-card {
-  background: linear-gradient(135deg, #ffffff, #eef9f4);
-}
-
-.advice-card.off-alert {
-  background: linear-gradient(135deg, #fff1f1, #ffd9d9);
-  border-color: #f4a4a4;
-  animation: advice-alert-blink 1s ease-in-out infinite;
-}
-
-.advice-card.off-alert .value,
-.advice-card.off-alert .hint,
-.advice-card.off-alert .label {
-  color: #b91c1c;
-}
-
-@keyframes advice-alert-blink {
-  0%,
-  100% {
-    box-shadow: 0 0 0 rgba(185, 28, 28, 0);
-    transform: scale(1);
+  const nowMs = Date.now();
+  const signature = buildRemoteSignature(data);
+  if (!lastRemoteSignature) {
+    lastRemoteSignature = signature;
+    lastRemoteChangeAtMs = nowMs;
+    return { isStale: !hasConfirmedLiveRemote, ageMs: NaN };
   }
-  50% {
-    box-shadow: 0 0 0 6px rgba(185, 28, 28, 0.14);
-    transform: scale(1.01);
+  if (signature !== lastRemoteSignature) {
+    lastRemoteSignature = signature;
+    lastRemoteChangeAtMs = nowMs;
+    hasConfirmedLiveRemote = true;
+    return { isStale: false, ageMs: 0 };
+  }
+  if (!hasConfirmedLiveRemote) return { isStale: true, ageMs: NaN };
+  const ageMsFromSignature = nowMs - lastRemoteChangeAtMs;
+  return { isStale: ageMsFromSignature > getRemoteStaleMs(), ageMs: ageMsFromSignature };
+}
+
+async function refreshWeather() {
+  try {
+    const response = await fetch(buildWeatherUrl(), { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const curr = data?.current;
+    if (!curr) throw new Error('No weather data');
+    const temp = Number(curr.temperature_2m);
+    setText('outsideTemp', Number.isNaN(temp) ? '--C' : `${Math.round(temp)}C`);
+    setText('weatherSummary', getWeatherDescription(curr.weather_code));
+    setText('weatherUpdated', `Updated: ${new Date().toLocaleTimeString()}`);
+  } catch (e) {
+    setText('outsideTemp', '--C');
+    setText('weatherSummary', `Weather unavailable: ${e.message}`);
+    setText('weatherUpdated', 'Weather update failed');
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .advice-card.off-alert {
-    animation: none;
+async function refreshRemoteStatus() {
+  try {
+    const shouldShowVerifying = !hasConfirmedLiveRemote && !lastRemoteSignature;
+    setVerifyingState(shouldShowVerifying);
+
+    const response = await fetch(buildRemoteUrl(), { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (!data) throw new Error('No device data yet');
+
+    const remoteState = getRemoteDataState(data);
+    const stale = remoteState.isStale;
+    const ageSec = Math.floor(remoteState.ageMs / 1000);
+
+    if (stale) {
+      setText('systemPower', 'OFF');
+      setText('systemHeartbeat', Number.isFinite(ageSec) ? `Last heartbeat ${ageSec}s ago` : 'Waiting for live update');
+      setText('connection', 'System offline');
+      setSystemCardState(false);
+      renderOfflinePlants();
+      setVerifyingState(false);
+      return;
+    }
+
+    // Device info
+    setText('ip', data.ip ?? '--');
+    setText('uptime', formatMinutes(data.uptimeMin));
+    setText('totalPlants', data.totalPlants ?? (data.plants?.length ?? '--'));
+    setText('lastUpdated', new Date().toLocaleTimeString());
+
+    const plants = data.plants ?? [];
+    const activeWateringCount = plants.filter(p => Boolean(p.watering)).length;
+    const faultedPlantCount = plants.filter(p => Boolean(p.fault)).length;
+    setText('activeWatering', `${activeWateringCount} active`);
+    setText('faultedSensors', `${faultedPlantCount} fault`);
+
+    setText('systemPower', 'ON');
+    setText('systemHeartbeat', `Last heartbeat ${ageSec}s ago`);
+    setSystemCardState(true);
+    setVerifyingState(false);
+
+    const connection = document.getElementById('connection');
+    if (connection) {
+      connection.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+      connection.className = '';
+    }
+
+    // Render per-plant cards
+    renderPlants(plants);
+
+  } catch (e) {
+    setVerifyingState(false);
+    setText('systemPower', 'OFF');
+    setText('systemHeartbeat', 'No heartbeat from device');
+    setSystemCardState(false);
+    renderOfflinePlants();
+    const connection = document.getElementById('connection');
+    if (connection) {
+      connection.textContent = `Connection issue: ${e.message}`;
+      connection.className = 'error';
+    }
   }
 }
 
-.spotlight-card {
-  border-radius: 22px;
-  padding: 18px 20px;
-  border: 1px solid var(--card-border);
-}
-
-.moisture-card {
-  background: linear-gradient(135deg, #e8fff6, #cff5e8);
-}
-
-.pulse-card {
-  background: linear-gradient(135deg, #ffffff, #f3fbf8);
-}
-
-.hint {
-  display: block;
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.moisture-progress {
-  margin-top: 18px;
-}
-
-.progress-track {
-  position: relative;
-  width: 100%;
-  height: 14px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: linear-gradient(90deg, #f59e0b 0%, #34d399 50%, #60a5fa 100%);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
-}
-
-.progress-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(245, 158, 11, 0.35), rgba(52, 211, 153, 0.55), rgba(96, 165, 250, 0.65));
-  transition: width 0.35s ease;
-}
-
-.progress-marker {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  border: 3px solid #ffffff;
-  background: var(--accent-deep);
-  box-shadow: 0 4px 10px rgba(11, 95, 89, 0.25);
-  transform: translate(-50%, -50%);
-  transition: left 0.35s ease;
-}
-
-.progress-labels {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 10px;
-  flex-wrap: wrap;
-}
-
-.progress-label {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 600;
-  transition: color 0.2s ease, transform 0.2s ease;
-}
-
-.progress-label.active {
-  color: var(--accent-deep);
-  transform: translateY(-1px);
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-}
-
-.metric {
-  background: var(--accent-soft);
-  border-radius: 18px;
-  padding: 16px;
-  border: 1px solid var(--card-border);
-}
-
-.label {
-  display: block;
-  font-size: 13px;
-  color: var(--muted);
-  margin-bottom: 8px;
-}
-
-.value {
-  display: block;
-  font-size: 34px;
-  font-weight: 700;
-  color: var(--accent);
-}
-
-.value.large {
-  font-size: 64px;
-  line-height: 1;
-}
-
-.value.medium {
-  font-size: 32px;
-  line-height: 1.2;
-}
-
-.value.small {
-  font-size: 20px;
-  color: var(--text);
-}
-
-.footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid #d1d5db;
-}
-
-.footer-title {
-  font-weight: 700;
-  color: var(--accent-deep);
-}
-
-.footer-note {
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.error {
-  color: var(--warn);
-}
-
-body.system-off-mode {
-  background:
-    radial-gradient(circle at top, rgba(220, 38, 38, 0.25), transparent 35%),
-    linear-gradient(180deg, #ffe8e8, #ffdede);
-}
-
-body.system-off-mode .card {
-  background: #fff6f6;
-  border-color: #efbcbc;
-  box-shadow: 0 22px 60px rgba(185, 28, 28, 0.2);
-}
-
-body.system-off-mode .spotlight-card,
-body.system-off-mode .weather-card,
-body.system-off-mode .range-card,
-body.system-off-mode .metric,
-body.system-off-mode .camera-card {
-  background: linear-gradient(135deg, #fff3f3, #ffe8e8);
-  border-color: #efc8c8;
-}
-
-@media (max-width: 780px) {
-  .card {
-    width: min(100%, 520px);
-    padding: 22px;
-  }
-
-  .hero,
-  .spotlight,
-  .care-panel,
-  .footer {
-    grid-template-columns: 1fr;
-    flex-direction: column;
-  }
-
-  .hero-statuses {
-    width: 100%;
-    grid-template-columns: 1fr;
-  }
-
-  .hero-chip,
-  .spotlight-card {
-    width: 100%;
-  }
-
-  .weather-card,
-  .weather-meta,
-  .camera-header {
-    align-items: flex-start;
-    text-align: left;
-  }
-
-  .weather-card {
-    width: 100%;
-  }
-
-  .grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .value.large {
-    font-size: 52px;
-  }
-}
-
-@media (max-width: 480px) {
-  .page {
-    padding: 14px;
-  }
-
-  .card {
-    border-radius: 24px;
-    padding: 18px;
-  }
-
-  h1 {
-    font-size: 30px;
-  }
-
-  .grid {
-    grid-template-columns: 1fr;
-  }
-
-  .value.large {
-    font-size: 46px;
-  }
-}
-
-
-/* ===== DEVICE ROW ===== */
-.device-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin: 0 0 18px;
-}
-
-.device-chip {
-  flex: 1 1 140px;
-  background: var(--accent-soft);
-  border: 1px solid var(--card-border);
-  border-radius: 12px;
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* ===== PLANTS SECTION ===== */
-.plants-section {
-  margin: 22px 0 0;
-}
-
-.section-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text);
-  margin: 0 0 14px;
-}
-
-.plants-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 16px;
-}
-
-.plant-card-placeholder {
-  grid-column: 1 / -1;
-  text-align: center;
-  color: var(--muted);
-  padding: 30px;
-  background: var(--accent-soft);
-  border-radius: 16px;
-  border: 1px dashed var(--card-border);
-}
-
-/* ===== PLANT CARD ===== */
-.plant-card {
-  background: var(--card);
-  border: 2px solid var(--card-border);
-  border-radius: 18px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  transition: box-shadow 0.2s;
-}
-
-.plant-card:hover {
-  box-shadow: 0 6px 24px rgba(15, 118, 110, 0.12);
-}
-
-.plant-card.status-ok     { border-color: #6ee7b7; }
-.plant-card.status-dry    { border-color: #fcd34d; }
-.plant-card.status-wet    { border-color: #93c5fd; }
-.plant-card.status-watering { border-color: #38bdf8; background: #f0faff; }
-.plant-card.status-fault  { border-color: var(--warn); }
-.plant-card.status-water-issue { border-color: #f97316; background: #fff7ed; }
-
-.plant-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.plant-name-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.plant-emoji {
-  font-size: 22px;
-}
-
-.plant-name {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.plant-status-badge {
-  font-size: 11px;
-  font-weight: 700;
-  background: var(--accent-soft);
-  color: var(--accent-deep);
-  border-radius: 20px;
-  padding: 3px 10px;
-  white-space: nowrap;
-}
-
-.status-watering .plant-status-badge {
-  background: #e0f2fe;
-  color: #0369a1;
-}
-
-.status-dry .plant-status-badge {
-  background: #fef9c3;
-  color: #92400e;
-}
-
-.status-fault .plant-status-badge,
-.status-water-issue .plant-status-badge {
-  background: #fee2e2;
-  color: var(--warn);
-}
-
-/* ===== MOISTURE ROW ===== */
-.plant-moisture-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
-.plant-moisture-value {
-  font-size: 28px;
-  font-weight: 800;
-  color: var(--accent);
-  line-height: 1;
-}
-
-.plant-target-range {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-/* ===== MOISTURE BAR ===== */
-.plant-bar-track {
-  position: relative;
-  height: 8px;
-  background: #e5e7eb;
-  border-radius: 99px;
-  overflow: visible;
-}
-
-.plant-bar-fill {
-  height: 100%;
-  border-radius: 99px;
-  transition: width 0.5s ease;
-}
-
-.bar-ok  { background: linear-gradient(90deg, #6ee7b7, #10b981); }
-.bar-dry { background: linear-gradient(90deg, #fde68a, #f59e0b); }
-.bar-wet { background: linear-gradient(90deg, #93c5fd, #3b82f6); }
-
-.plant-bar-marker {
-  position: absolute;
-  top: -3px;
-  width: 14px;
-  height: 14px;
-  background: white;
-  border: 2px solid var(--accent);
-  border-radius: 50%;
-  transform: translateX(-50%);
-  transition: left 0.5s ease;
-}
-
-.plant-bar-labels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--muted);
-  margin-top: 2px;
-}
-
-.bar-label-active {
-  color: var(--accent);
-  font-weight: 700;
-}
-
-/* ===== PLANT METRICS GRID ===== */
-.plant-metrics {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.plant-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.plant-metric-label {
-  font-size: 10px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.plant-metric-value {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.value-on  { color: #0284c7; }
-.value-off { color: var(--muted); }
-.value-warn { color: var(--warn); }
-
-/* ===== PLANT ALERT BANNER ===== */
-.plant-alert {
-  background: #fee2e2;
-  color: var(--warn);
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 8px;
-  padding: 6px 10px;
-  text-align: center;
-}
+refreshWeather();
+refreshRemoteStatus();
+setInterval(refreshWeather, 600000);
+setInterval(refreshRemoteStatus, 3000);
