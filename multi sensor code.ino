@@ -29,11 +29,21 @@ static const char *PLANT_NAMES[NUM_PLANTS] = {
   "Fern"
 };
 
-// Sensor GPIO pins (Analog inputs on your ESP32 board labels: P34, P35, P32, P33, SVN)
+// Sensor GPIO pins (Analog inputs: P34, P35, P32, P33, SVN/P39)
 static const int SENSOR_PINS[NUM_PLANTS] = {34, 35, 32, 33, 39};
 
-// Relay GPIO pins (Digital outputs on your board labels: P23, P25, P26, P27, P13)
-static const int RELAY_PINS[NUM_PLANTS] = {23, 25, 26, 27, 13};
+// Shared pump GPIO pin (P23) - runs whenever ANY plant is watered
+static const int PUMP_PIN = 23;
+
+// Solenoid valve GPIO pins per plant (8-channel relay plan)
+// Plant mapping:
+//   Plant 0 (ZZ Plant)   -> GPIO14 (Valve CH1)
+//   Plant 1 (Monstera)   -> GPIO25 (Valve CH2)
+//   Plant 2 (Pothos)     -> GPIO26 (Valve CH3)
+//   Plant 3 (Snake Plant)-> GPIO27 (Valve CH4)
+//   Plant 4 (Fern)       -> GPIO13 (Valve CH5)
+// Relay CH6-CH8 are intentionally free for future use.
+static const int VALVE_PINS[NUM_PLANTS] = {14, 25, 26, 27, 13};
 
 // ============ PLANT-SPECIFIC CALIBRATION ============
 // Each plant has different moisture requirements
@@ -51,17 +61,17 @@ static const PlantConfig PLANT_CONFIG[NUM_PLANTS] = {
   // ZZ Plant - tolerates dry soil well
   {"ZZ Plant",      4000, 750,  40,  60,  3000},
   
-  // Monstera - needs more frequent watering
-  {"Monstera",      4000, 750,  50,  70,  4000},
+  // Monstera - new sensor calibrated (dry=3500, wet=1150)
+  {"Monstera",      3500, 1150, 50,  70,  4000},
   
-  // Pothos - moderate watering
-  {"Pothos",        4000, 750,  45,  65,  3500},
+  // Pothos - new sensor calibrated (dry=3500, wet=1150)
+  {"Pothos",        3500, 1150, 45,  65,  3500},
   
-  // Snake Plant - very drought tolerant
-  {"Snake Plant",   4000, 750,  30,  50,  2000},
+  // Snake Plant - new sensor calibrated (dry=3500, wet=1150)
+  {"Snake Plant",   3500, 1150, 30,  50,  2000},
   
-  // Fern - needs consistently moist soil
-  {"Fern",          4000, 750,  60,  80,  5000}
+  // Fern - new sensor calibrated (dry=3500, wet=1150)
+  {"Fern",          3500, 1150, 60,  80,  5000}
 };
 
 // ============ PLANT STATE TRACKING ============
@@ -69,6 +79,8 @@ struct PlantState {
   int filteredRaw;
   int moisturePct;
   int previousRaw;
+  int invalidReadStreak;
+  int validReadStreak;
   bool sensorFault;
   bool waterSupplyIssue;
   bool pumpRunning;
@@ -117,6 +129,12 @@ static const unsigned long LCD_NAV_UPDATE_MS = 5000;  // Auto-switch plant displ
 static const int CHANGE_DELTA = 5;
 static const int SENSOR_SAMPLES = 12;
 static const int WATER_GAIN_CLEAR_PERCENT = 2;
+static const int ADC_RAW_MIN_VALID = 50;
+static const int ADC_RAW_MAX_VALID = 4090;
+static const int CALIBRATION_RANGE_MARGIN = 300;
+static const int FLOATING_SENSOR_SPREAD_THRESHOLD = 450;
+static const int SENSOR_FAULT_STREAK_LIMIT = 3;
+static const int SENSOR_FAULT_CLEAR_STREAK = 3;
 
 // ============ INITIALIZATION FUNCTIONS ============
 
@@ -149,12 +167,17 @@ void restoreLcdAfterPump()
 
 void initializeRelays()
 {
+  // Shared pump pin (GPIO23)
+  pinMode(PUMP_PIN, OUTPUT_OPEN_DRAIN);
+  digitalWrite(PUMP_PIN, HIGH);  // Pump OFF
+
+  // Solenoid valve pins on 8-channel relay
   for (int i = 0; i < NUM_PLANTS; i++)
   {
-    pinMode(RELAY_PINS[i], OUTPUT_OPEN_DRAIN);
-    digitalWrite(RELAY_PINS[i], HIGH);  // Relay OFF
+    pinMode(VALVE_PINS[i], OUTPUT_OPEN_DRAIN);
+    digitalWrite(VALVE_PINS[i], HIGH);  // Valve CLOSED
   }
-  Serial.println("All relays initialized (OFF state)");
+  Serial.println("Pump and all valves initialized (OFF/CLOSED state)");
 }
 
 void initializeSensors()
@@ -169,6 +192,8 @@ void initializeSensors()
     plantStates[i].filteredRaw = PLANT_CONFIG[i].airRaw;
     plantStates[i].moisturePct = 0;
     plantStates[i].previousRaw = -1;
+    plantStates[i].invalidReadStreak = 0;
+    plantStates[i].validReadStreak = 0;
     plantStates[i].sensorFault = false;
     plantStates[i].waterSupplyIssue = false;
     plantStates[i].pumpRunning = false;
@@ -187,14 +212,26 @@ void initializeSensors()
 
 // ============ SENSOR & WATERING LOGIC ============
 
-int readFilteredRaw(int plantIndex)
+int readFilteredRaw(int plantIndex, int *spreadOut)
 {
   long total = 0;
+  int minimumRaw = 4095;
+  int maximumRaw = 0;
+
   for (int index = 0; index < SENSOR_SAMPLES; ++index)
   {
-    total += analogRead(SENSOR_PINS[plantIndex]);
+    int sample = analogRead(SENSOR_PINS[plantIndex]);
+    total += sample;
+    minimumRaw = min(minimumRaw, sample);
+    maximumRaw = max(maximumRaw, sample);
     delay(4);
   }
+
+  if (spreadOut != nullptr)
+  {
+    *spreadOut = maximumRaw - minimumRaw;
+  }
+
   return total / SENSOR_SAMPLES;
 }
 
@@ -209,12 +246,17 @@ int rawToPercent(int raw, int plantIndex)
 
 void relayOn(int plantIndex)
 {
-  digitalWrite(RELAY_PINS[plantIndex], LOW);
+  // Open target plant valve first, then start shared pump
+  digitalWrite(VALVE_PINS[plantIndex], LOW);  // Open valve
+  delay(50);                                   // Let valve open before water flows
+  digitalWrite(PUMP_PIN, LOW);  // Start shared pump
 }
 
 void relayOff(int plantIndex)
 {
-  digitalWrite(RELAY_PINS[plantIndex], HIGH);
+  digitalWrite(PUMP_PIN, HIGH);  // Stop shared pump first
+  delay(50);                                   // Let pump fully stop
+  digitalWrite(VALVE_PINS[plantIndex], HIGH);  // Close valve
 }
 
 void resetWaterSupplyMonitor(int plantIndex)
@@ -254,20 +296,44 @@ void evaluateWaterSupplyIssue(int plantIndex)
 void updateSensorState(int plantIndex)
 {
   PlantState *state = &plantStates[plantIndex];
+  int rawSpread = 0;
+  int wetRaw = PLANT_CONFIG[plantIndex].wetRaw;
+  int airRaw = PLANT_CONFIG[plantIndex].airRaw;
   
-  state->filteredRaw = readFilteredRaw(plantIndex);
+  state->filteredRaw = readFilteredRaw(plantIndex, &rawSpread);
   state->moisturePct = rawToPercent(state->filteredRaw, plantIndex);
 
   if (state->previousRaw < 0 || abs(state->filteredRaw - state->previousRaw) > CHANGE_DELTA)
   {
     state->lastMeaningfulChangeMs = millis();
-    state->sensorFault = false;
   }
 
-  if (millis() - state->lastMeaningfulChangeMs > STALE_MS)
+  int validMinRaw = wetRaw - CALIBRATION_RANGE_MARGIN;
+  int validMaxRaw = airRaw + CALIBRATION_RANGE_MARGIN;
+  bool isOutOfAdcBounds = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw >= ADC_RAW_MAX_VALID);
+  bool isOutsideCalibratedRange = (state->filteredRaw < validMinRaw || state->filteredRaw > validMaxRaw);
+  bool hasFloatingNoisePattern = (rawSpread >= FLOATING_SENSOR_SPREAD_THRESHOLD);
+  bool disconnectedNow = (isOutOfAdcBounds || isOutsideCalibratedRange || hasFloatingNoisePattern);
+
+  if (disconnectedNow)
   {
-    state->sensorFault = true;
+    state->invalidReadStreak++;
+    state->validReadStreak = 0;
   }
+  else
+  {
+    state->validReadStreak++;
+    state->invalidReadStreak = max(0, state->invalidReadStreak - 1);
+  }
+
+  bool disconnectedFault = (state->invalidReadStreak >= SENSOR_FAULT_STREAK_LIMIT);
+  if (state->validReadStreak >= SENSOR_FAULT_CLEAR_STREAK && !disconnectedFault)
+  {
+    disconnectedFault = false;
+  }
+
+  bool staleFault = (millis() - state->lastMeaningfulChangeMs > STALE_MS);
+  state->sensorFault = (staleFault || disconnectedFault);
 
   evaluateWaterSupplyIssue(plantIndex);
 
