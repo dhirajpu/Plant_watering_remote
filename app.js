@@ -130,9 +130,9 @@ function renderPlantSummaryCards(plants) {
 function getFaultReason(plant) {
   const reason = typeof plant.sensorFaultReason === 'string' ? plant.sensorFaultReason.trim() : '';
   if (reason && reason !== 'None') return reason;
-  if (plant.waterIssue) return 'Water supply issue';
-  if (plant.fault) return 'Sensor fault detected';
-  return 'None';
+  if (parseBool(plant.waterIssue)) return 'Water supply issue';
+  if (parseBool(plant.fault)) return 'Sensor fault detected';
+  return 'No fault';
 }
 
 function buildPlantCard(plant, index) {
@@ -196,7 +196,7 @@ function buildPlantCard(plant, index) {
         </div>
         <div class="plant-metric">
           <span class="plant-metric-label">Fault Reason</span>
-          <span class="plant-metric-value ${faultReason !== 'None' ? 'value-warn' : ''}">${faultReason}</span>
+          <span class="plant-metric-value ${faultReason !== 'No fault' ? 'value-warn' : ''}">${faultReason}</span>
         </div>
         <div class="plant-metric">
           <span class="plant-metric-label">Raw</span>
