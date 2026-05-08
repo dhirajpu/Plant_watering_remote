@@ -320,10 +320,14 @@ void updateSensorState(int plantIndex)
 
   int validMinRaw = wetRaw - CALIBRATION_RANGE_MARGIN;
   int validMaxRaw = airRaw + CALIBRATION_RANGE_MARGIN;
-  state->adcBoundsFault = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw >= ADC_RAW_MAX_VALID);
-  state->rangeFault = (state->filteredRaw < validMinRaw || state->filteredRaw > validMaxRaw);
-  state->floatingFault = (rawSpread >= FLOATING_SENSOR_SPREAD_THRESHOLD);
-  bool disconnectedNow = (state->adcBoundsFault || state->rangeFault || state->floatingFault);
+  // Temporarily disabled: ADC/range/spread fault heuristics (as requested)
+  // state->adcBoundsFault = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw >= ADC_RAW_MAX_VALID);
+  // state->rangeFault = (state->filteredRaw < validMinRaw || state->filteredRaw > validMaxRaw);
+  // state->floatingFault = (rawSpread >= FLOATING_SENSOR_SPREAD_THRESHOLD);
+  state->adcBoundsFault = false;
+  state->rangeFault = false;
+  state->floatingFault = false;
+  bool disconnectedNow = false;
 
   if (disconnectedNow)
   {
@@ -484,7 +488,7 @@ void controlSharedPump()
   if (activePlantIndex >= 0)
   {
     PlantState *active = &plantStates[activePlantIndex];
-    int targetLow = PLANT_CONFIG[activePlantIndex].targetLow;
+    int targetHigh = PLANT_CONFIG[activePlantIndex].targetHigh;
 
     if (active->sensorFault)
     {
@@ -500,26 +504,32 @@ void controlSharedPump()
       return;
     }
 
-    if (active->moisturePct >= targetLow)
+    // Hysteresis: start below targetLow, stop only at/above targetHigh.
+    // Also never stop mid-burst due to noisy readings.
+    if (active->pumpRunning)
+    {
+      if (millis() - active->burstStartMs >= active->currentBurstMs)
+      {
+        stopPump(activePlantIndex);
+
+        if (active->moisturePct >= targetHigh)
+        {
+          resetWaterSupplyMonitor(activePlantIndex);
+          activePlantIndex = -1;
+        }
+      }
+      return;
+    }
+
+    if (active->moisturePct >= targetHigh)
     {
       resetWaterSupplyMonitor(activePlantIndex);
-      stopPump(activePlantIndex);
       activePlantIndex = -1;
       return;
     }
 
-    if (!active->pumpRunning)
-    {
-      startPumpBurst(activePlantIndex);
-      return;
-    }
-
-    if (millis() - active->burstStartMs >= active->currentBurstMs)
-    {
-      stopPump(activePlantIndex);
-      activePlantIndex = -1;
-    }
-
+    // Continue burst watering for this owner until targetHigh is reached.
+    startPumpBurst(activePlantIndex);
     return;
   }
 
@@ -592,7 +602,7 @@ String getSensorFaultReasonText(int plantIndex)
     return "No Change/Disconnected";
   }
 
-  return "Unknown";
+  return "Sensor fault";
 }
 
 String getSensorHealthText(int plantIndex)
