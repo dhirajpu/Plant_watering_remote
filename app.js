@@ -85,6 +85,48 @@ function getStatusEmoji(status, watering) {
   return '🌱';
 }
 
+function parseBool(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
+  }
+  return false;
+}
+
+function summarizePlants(plants) {
+  const safePlants = Array.isArray(plants) ? plants : [];
+  const activeWateringCount = safePlants.filter(plant => parseBool(plant.watering)).length;
+  const faultedPlantCount = safePlants.filter(plant => parseBool(plant.fault) || parseBool(plant.waterIssue)).length;
+  const topFaultNames = safePlants
+    .filter(plant => parseBool(plant.fault) || parseBool(plant.waterIssue))
+    .slice(0, 3)
+    .map(plant => plant.name ?? 'Plant')
+    .join(', ');
+
+  return {
+    activeWateringCount,
+    faultedPlantCount,
+    topFaultNames
+  };
+}
+
+function renderPlantSummaryCards(plants) {
+  const summary = summarizePlants(plants);
+
+  setText('activeWatering', `${summary.activeWateringCount} active`);
+  setText('faultedSensors', `${summary.faultedPlantCount} fault`);
+
+  setText('faultSummaryCount', `${summary.faultedPlantCount} plant${summary.faultedPlantCount === 1 ? '' : 's'} affected`);
+  setText(
+    'faultSummaryHint',
+    summary.faultedPlantCount > 0
+      ? `Attention: ${summary.topFaultNames}`
+      : 'All sensors and water lines look healthy.'
+  );
+}
+
 function getFaultReason(plant) {
   const reason = typeof plant.sensorFaultReason === 'string' ? plant.sensorFaultReason.trim() : '';
   if (reason && reason !== 'None') return reason;
@@ -96,9 +138,9 @@ function getFaultReason(plant) {
 function buildPlantCard(plant, index) {
   const moisture = Number(plant.moisture);
   const moistureStatus = getMoistureStatus(plant.moisture, plant.targetLow, plant.targetHigh);
-  const isWatering = Boolean(plant.watering);
-  const hasFault = Boolean(plant.fault);
-  const hasWaterIssue = Boolean(plant.waterIssue);
+  const isWatering = parseBool(plant.watering);
+  const hasFault = parseBool(plant.fault);
+  const hasWaterIssue = parseBool(plant.waterIssue);
   const pumpState = isWatering ? 'ON' : 'OFF';
   const valveState = isWatering ? 'OPEN' : 'CLOSED';
   const faultReason = getFaultReason(plant);
@@ -167,7 +209,7 @@ function buildPlantCard(plant, index) {
       </div>
 
       ${hasWaterIssue ? `<div class="plant-alert">Water supply issue - check tank or pipe</div>` : ''}
-      ${plant.fault && !hasWaterIssue ? `<div class="plant-alert">Sensor fault: ${faultReason}</div>` : ''}
+      ${hasFault && !hasWaterIssue ? `<div class="plant-alert">Sensor fault: ${faultReason}</div>` : ''}
     </div>
   `;
 }
@@ -259,6 +301,7 @@ async function refreshRemoteStatus() {
       setText('systemPower', 'OFF');
       setText('systemHeartbeat', Number.isFinite(ageSec) ? `Last heartbeat ${ageSec}s ago` : 'Waiting for live update');
       setText('connection', 'System offline');
+      renderPlantSummaryCards([]);
       setSystemCardState(false);
       renderOfflinePlants();
       setVerifyingState(false);
@@ -272,10 +315,7 @@ async function refreshRemoteStatus() {
     setText('lastUpdated', new Date().toLocaleTimeString());
 
     const plants = data.plants ?? [];
-    const activeWateringCount = plants.filter(p => Boolean(p.watering)).length;
-    const faultedPlantCount = plants.filter(p => Boolean(p.fault)).length;
-    setText('activeWatering', `${activeWateringCount} active`);
-    setText('faultedSensors', `${faultedPlantCount} fault`);
+    renderPlantSummaryCards(plants);
 
     setText('systemPower', 'ON');
     setText('systemHeartbeat', `Last heartbeat ${ageSec}s ago`);
@@ -295,6 +335,7 @@ async function refreshRemoteStatus() {
     setVerifyingState(false);
     setText('systemPower', 'OFF');
     setText('systemHeartbeat', 'No heartbeat from device');
+    renderPlantSummaryCards([]);
     setSystemCardState(false);
     renderOfflinePlants();
     const connection = document.getElementById('connection');
