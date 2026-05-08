@@ -129,9 +129,16 @@ function renderPlantSummaryCards(plants) {
 
 function getFaultReason(plant) {
   const reason = typeof plant.sensorFaultReason === 'string' ? plant.sensorFaultReason.trim() : '';
+  const hasWaterIssue = parseBool(plant.waterIssue);
+  const hasFault = parseBool(plant.fault);
+
+  if (!hasFault && !hasWaterIssue) {
+    return 'No fault';
+  }
+
   if (reason && reason !== 'None') return reason;
-  if (parseBool(plant.waterIssue)) return 'Water supply issue';
-  if (parseBool(plant.fault)) return 'Sensor fault detected';
+  if (hasWaterIssue) return 'Water supply issue';
+  if (hasFault) return 'Sensor fault detected';
   return 'No fault';
 }
 
