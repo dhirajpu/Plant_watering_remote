@@ -320,10 +320,22 @@ void updateSensorState(int plantIndex)
 
   int validMinRaw = wetRaw - CALIBRATION_RANGE_MARGIN;
   int validMaxRaw = airRaw + CALIBRATION_RANGE_MARGIN;
-  state->adcBoundsFault = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw >= ADC_RAW_MAX_VALID);
-  state->rangeFault = (state->filteredRaw < validMinRaw || state->filteredRaw > validMaxRaw);
-  state->floatingFault = (rawSpread >= FLOATING_SENSOR_SPREAD_THRESHOLD);
-  bool disconnectedNow = (state->adcBoundsFault || state->rangeFault || state->floatingFault);
+
+  bool skipDisconnectCheck = state->pumpRunning;
+  if (skipDisconnectCheck)
+  {
+    state->adcBoundsFault = false;
+    state->rangeFault = false;
+    state->floatingFault = false;
+  }
+  else
+  {
+    state->adcBoundsFault = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw >= ADC_RAW_MAX_VALID);
+    state->rangeFault = (state->filteredRaw < validMinRaw || state->filteredRaw > validMaxRaw);
+    state->floatingFault = (rawSpread >= FLOATING_SENSOR_SPREAD_THRESHOLD);
+  }
+
+  bool disconnectedNow = (!skipDisconnectCheck && (state->adcBoundsFault || state->rangeFault || state->floatingFault));
 
   if (disconnectedNow)
   {
