@@ -79,8 +79,12 @@ struct PlantState {
   int filteredRaw;
   int moisturePct;
   int previousRaw;
+  int rawSpread;
   int invalidReadStreak;
   int validReadStreak;
+  bool adcBoundsFault;
+  bool rangeFault;
+  bool floatingFault;
   bool sensorFault;
   bool waterSupplyIssue;
   bool pumpRunning;
@@ -129,12 +133,12 @@ static const unsigned long LCD_NAV_UPDATE_MS = 5000;  // Auto-switch plant displ
 static const int CHANGE_DELTA = 5;
 static const int SENSOR_SAMPLES = 12;
 static const int WATER_GAIN_CLEAR_PERCENT = 2;
-static const int ADC_RAW_MIN_VALID = 50;
-static const int ADC_RAW_MAX_VALID = 4090;
-static const int CALIBRATION_RANGE_MARGIN = 300;
-static const int FLOATING_SENSOR_SPREAD_THRESHOLD = 450;
-static const int SENSOR_FAULT_STREAK_LIMIT = 3;
-static const int SENSOR_FAULT_CLEAR_STREAK = 3;
+static const int ADC_RAW_MIN_VALID = 80;
+static const int ADC_RAW_MAX_VALID = 4080;
+static const int CALIBRATION_RANGE_MARGIN = 200;
+static const int FLOATING_SENSOR_SPREAD_THRESHOLD = 300;
+static const int SENSOR_FAULT_STREAK_LIMIT = 2;
+static const int SENSOR_FAULT_CLEAR_STREAK = 4;
 
 // ============ INITIALIZATION FUNCTIONS ============
 
@@ -192,8 +196,12 @@ void initializeSensors()
     plantStates[i].filteredRaw = PLANT_CONFIG[i].airRaw;
     plantStates[i].moisturePct = 0;
     plantStates[i].previousRaw = -1;
+    plantStates[i].rawSpread = 0;
     plantStates[i].invalidReadStreak = 0;
     plantStates[i].validReadStreak = 0;
+    plantStates[i].adcBoundsFault = false;
+    plantStates[i].rangeFault = false;
+    plantStates[i].floatingFault = false;
     plantStates[i].sensorFault = false;
     plantStates[i].waterSupplyIssue = false;
     plantStates[i].pumpRunning = false;
@@ -301,6 +309,7 @@ void updateSensorState(int plantIndex)
   int airRaw = PLANT_CONFIG[plantIndex].airRaw;
   
   state->filteredRaw = readFilteredRaw(plantIndex, &rawSpread);
+  state->rawSpread = rawSpread;
   state->moisturePct = rawToPercent(state->filteredRaw, plantIndex);
 
   if (state->previousRaw < 0 || abs(state->filteredRaw - state->previousRaw) > CHANGE_DELTA)
@@ -310,10 +319,10 @@ void updateSensorState(int plantIndex)
 
   int validMinRaw = wetRaw - CALIBRATION_RANGE_MARGIN;
   int validMaxRaw = airRaw + CALIBRATION_RANGE_MARGIN;
-  bool isOutOfAdcBounds = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw >= ADC_RAW_MAX_VALID);
-  bool isOutsideCalibratedRange = (state->filteredRaw < validMinRaw || state->filteredRaw > validMaxRaw);
-  bool hasFloatingNoisePattern = (rawSpread >= FLOATING_SENSOR_SPREAD_THRESHOLD);
-  bool disconnectedNow = (isOutOfAdcBounds || isOutsideCalibratedRange || hasFloatingNoisePattern);
+  state->adcBoundsFault = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw >= ADC_RAW_MAX_VALID);
+  state->rangeFault = (state->filteredRaw < validMinRaw || state->filteredRaw > validMaxRaw);
+  state->floatingFault = (rawSpread >= FLOATING_SENSOR_SPREAD_THRESHOLD);
+  bool disconnectedNow = (state->adcBoundsFault || state->rangeFault || state->floatingFault);
 
   if (disconnectedNow)
   {
@@ -470,13 +479,45 @@ String getStatusText(int plantIndex)
   return "Dry";
 }
 
+String getSensorFaultReasonText(int plantIndex)
+{
+  PlantState *state = &plantStates[plantIndex];
+
+  if (!state->sensorFault)
+  {
+    return "None";
+  }
+
+  if (state->adcBoundsFault)
+  {
+    return "ADC Out of Bounds";
+  }
+
+  if (state->rangeFault)
+  {
+    return "Outside Calibration";
+  }
+
+  if (state->floatingFault)
+  {
+    return "Floating/Unwired";
+  }
+
+  if (millis() - state->lastMeaningfulChangeMs > STALE_MS)
+  {
+    return "No Change/Disconnected";
+  }
+
+  return "Unknown";
+}
+
 String getSensorHealthText(int plantIndex)
 {
   PlantState *state = &plantStates[plantIndex];
   
   if (state->sensorFault)
   {
-    return "Fault";
+    return "Fault: " + getSensorFaultReasonText(plantIndex);
   }
 
   if (state->waterSupplyIssue)
@@ -693,6 +734,7 @@ String buildRemoteJson()
     json += "\"fault\":" + String((state->sensorFault || state->waterSupplyIssue) ? "true" : "false") + ",";
     json += "\"waterIssue\":" + String(state->waterSupplyIssue ? "true" : "false") + ",";
     json += "\"sensorHealth\":\"" + getSensorHealthText(i) + "\",";
+    json += "\"sensorFaultReason\":\"" + getSensorFaultReasonText(i) + "\",";
     json += "\"status\":\"" + getStatusText(i) + "\",";
     json += "\"targetLow\":" + String(PLANT_CONFIG[i].targetLow) + ",";
     json += "\"targetHigh\":" + String(PLANT_CONFIG[i].targetHigh) + ",";
@@ -766,6 +808,10 @@ void printSerialStatus()
     Serial.print(state->pumpRunning ? "YES" : "NO");
     Serial.print(" Fault=");
     Serial.print((state->sensorFault || state->waterSupplyIssue) ? "YES" : "NO");
+    Serial.print(" FaultReason=");
+    Serial.print(getSensorFaultReasonText(i));
+    Serial.print(" Spread=");
+    Serial.print(state->rawSpread);
     Serial.println();
   }
   Serial.println("---");
