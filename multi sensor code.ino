@@ -118,6 +118,7 @@ unsigned long lastLcdNavUpdateMs = 0;
 
 String deviceIp = "offline";
 int currentDisplayPlantIndex = 0;  // Which plant to display on LCD
+int activePlantIndex = -1;         // Single plant currently using shared pump
 
 static const unsigned long LCD_UPDATE_MS = 1500;
 static const unsigned long SENSOR_SAMPLE_MS = 500;
@@ -444,6 +445,89 @@ void controlPump(int plantIndex)
   if (millis() - state->burstStartMs >= state->currentBurstMs)
   {
     stopPump(plantIndex);
+  }
+}
+
+int findNextPlantNeedingWater()
+{
+  for (int i = 0; i < NUM_PLANTS; i++)
+  {
+    PlantState *state = &plantStates[i];
+
+    if (state->sensorFault)
+    {
+      continue;
+    }
+
+    if (state->waterSupplyIssue)
+    {
+      if (millis() - state->lastWaterIssueMs < WATER_RETRY_MS)
+      {
+        continue;
+      }
+
+      state->waterSupplyIssue = false;
+      resetWaterSupplyMonitor(i);
+    }
+
+    if (state->moisturePct < PLANT_CONFIG[i].targetLow)
+    {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+void controlSharedPump()
+{
+  if (activePlantIndex >= 0)
+  {
+    PlantState *active = &plantStates[activePlantIndex];
+    int targetLow = PLANT_CONFIG[activePlantIndex].targetLow;
+
+    if (active->sensorFault)
+    {
+      stopPump(activePlantIndex);
+      activePlantIndex = -1;
+      return;
+    }
+
+    if (active->waterSupplyIssue)
+    {
+      stopPump(activePlantIndex);
+      activePlantIndex = -1;
+      return;
+    }
+
+    if (active->moisturePct >= targetLow)
+    {
+      resetWaterSupplyMonitor(activePlantIndex);
+      stopPump(activePlantIndex);
+      activePlantIndex = -1;
+      return;
+    }
+
+    if (!active->pumpRunning)
+    {
+      startPumpBurst(activePlantIndex);
+      return;
+    }
+
+    if (millis() - active->burstStartMs >= active->currentBurstMs)
+    {
+      stopPump(activePlantIndex);
+      activePlantIndex = -1;
+    }
+
+    return;
+  }
+
+  int nextPlant = findNextPlantNeedingWater();
+  if (nextPlant >= 0)
+  {
+    activePlantIndex = nextPlant;
+    startPumpBurst(activePlantIndex);
   }
 }
 
@@ -865,12 +949,14 @@ void loop()
   {
     lastSampleMs = millis();
     
-    // Update all sensor states and control pumps
+    // Update all sensor states
     for (int i = 0; i < NUM_PLANTS; i++)
     {
       updateSensorState(i);
-      controlPump(i);
     }
+
+    // Shared pump controller (single active plant at a time)
+    controlSharedPump();
 
     printSerialStatus();
   }
