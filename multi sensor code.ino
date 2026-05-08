@@ -320,14 +320,10 @@ void updateSensorState(int plantIndex)
 
   int validMinRaw = wetRaw - CALIBRATION_RANGE_MARGIN;
   int validMaxRaw = airRaw + CALIBRATION_RANGE_MARGIN;
-  // Temporarily disabled: ADC/range/spread fault heuristics (as requested)
-  // state->adcBoundsFault = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw >= ADC_RAW_MAX_VALID);
-  // state->rangeFault = (state->filteredRaw < validMinRaw || state->filteredRaw > validMaxRaw);
-  // state->floatingFault = (rawSpread >= FLOATING_SENSOR_SPREAD_THRESHOLD);
-  state->adcBoundsFault = false;
-  state->rangeFault = false;
-  state->floatingFault = false;
-  bool disconnectedNow = false;
+  state->adcBoundsFault = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw >= ADC_RAW_MAX_VALID);
+  state->rangeFault = (state->filteredRaw < validMinRaw || state->filteredRaw > validMaxRaw);
+  state->floatingFault = (rawSpread >= FLOATING_SENSOR_SPREAD_THRESHOLD);
+  bool disconnectedNow = (state->adcBoundsFault || state->rangeFault || state->floatingFault);
 
   if (disconnectedNow)
   {
@@ -584,7 +580,7 @@ String getSensorFaultReasonText(int plantIndex)
 
   if (state->adcBoundsFault)
   {
-    return "ADC Out of Bounds";
+    return "Sensor Disconnected";
   }
 
   if (state->rangeFault)
