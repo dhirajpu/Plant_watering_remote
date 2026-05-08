@@ -59,7 +59,7 @@ struct PlantConfig {
 // Configure each plant's watering preferences
 static const PlantConfig PLANT_CONFIG[NUM_PLANTS] = {
   // ZZ Plant - tolerates dry soil well
-  {"ZZ Plant",      4000, 750,  40,  60,  3000},
+  {"ZZ Plant",      4000, 1750,  40,  60,  3000},
   
   // Monstera - new sensor calibrated (dry=3500, wet=1150)
   {"Monstera",      3500, 1150, 50,  70,  4000},
@@ -119,6 +119,19 @@ unsigned long lastLcdNavUpdateMs = 0;
 String deviceIp = "offline";
 int currentDisplayPlantIndex = 0;  // Which plant to display on LCD
 int activePlantIndex = -1;         // Single plant currently using shared pump
+bool systemReady = false;           // Flag to track boot completion
+
+// Boot stage tracking
+enum BootStage {
+  BOOT_START,
+  BOOT_LCD_INIT,
+  BOOT_SENSORS,
+  BOOT_RELAYS,
+  BOOT_WIFI,
+  BOOT_COMPLETE
+};
+BootStage currentBootStage = BOOT_START;
+unsigned long bootStageStartMs = 0;
 
 static const unsigned long LCD_UPDATE_MS = 1500;
 static const unsigned long SENSOR_SAMPLE_MS = 500;
@@ -145,6 +158,7 @@ static const int SENSOR_FAULT_CLEAR_STREAK = 4;
 
 void safeLcdInit()
 {
+  currentBootStage = BOOT_LCD_INIT;
   delay(250);
   Wire.begin(SDA_PIN, SCL_PIN);
   Wire.setClock(50000);
@@ -172,6 +186,7 @@ void restoreLcdAfterPump()
 
 void initializeRelays()
 {
+  currentBootStage = BOOT_RELAYS;
   // Shared pump pin (GPIO23)
   pinMode(PUMP_PIN, OUTPUT_OPEN_DRAIN);
   digitalWrite(PUMP_PIN, HIGH);  // Pump OFF
@@ -187,6 +202,7 @@ void initializeRelays()
 
 void initializeSensors()
 {
+  currentBootStage = BOOT_SENSORS;
   analogReadResolution(12);
   
   for (int i = 0; i < NUM_PLANTS; i++)
@@ -660,6 +676,47 @@ void writeLine(uint8_t row, const char *text)
 
 void refreshDisplay(bool force)
 {
+  if (!systemReady)
+  {
+    // Display progressive boot messages
+    const char *line1 = "Starting...";
+    const char *line2 = "Connecting...";
+    
+    switch (currentBootStage)
+    {
+      case BOOT_START:
+        line1 = "Plant Care";
+        line2 = "Starting...";
+        break;
+      case BOOT_LCD_INIT:
+        line1 = "Display Init";
+        line2 = "Ready";
+        break;
+      case BOOT_SENSORS:
+        line1 = "Sensors Init";
+        line2 = "Calibrating...";
+        break;
+      case BOOT_RELAYS:
+        line1 = "Relays Init";
+        line2 = "Pump & Valves";
+        break;
+      case BOOT_WIFI:
+        line1 = "WiFi Connect";
+        line2 = "Please wait...";
+        break;
+      case BOOT_COMPLETE:
+        line1 = "System Ready!";
+        line2 = "Loading...";
+        break;
+      default:
+        break;
+    }
+    
+    writeLine(0, line1);
+    writeLine(1, line2);
+    return;
+  }
+
   if (showStartupIp)
   {
     if (!force && millis() >= startupIpUntilMs)
@@ -726,6 +783,7 @@ void refreshDisplay(bool force)
 
 void connectWifi()
 {
+  currentBootStage = BOOT_WIFI;
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -946,9 +1004,18 @@ void setup()
   }
   Serial.println("========================================\n");
 
+  currentBootStage = BOOT_START;
   safeLcdInit();
+  refreshDisplay(true);  // Show initial boot message
+  delay(500);
+  
   initializeSensors();
+  refreshDisplay(true);
+  delay(500);
+  
   initializeRelays();
+  refreshDisplay(true);
+  delay(500);
   
   for (int i = 0; i < NUM_PLANTS; i++)
   {
@@ -957,6 +1024,12 @@ void setup()
   
   connectWifi();
   refreshDisplay(true);
+  
+  currentBootStage = BOOT_COMPLETE;
+  refreshDisplay(true);
+  delay(1000);
+  
+  systemReady = true;  // Mark system as ready for normal operation
 }
 
 void loop()
