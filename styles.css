@@ -766,6 +766,7 @@ body.system-off-mode .camera-card {
 
 .value-on  { color: #0284c7; }
 .value-off { color: var(--muted); }
+.value-warn { color: var(--warn); }
 
 /* ===== PLANT ALERT BANNER ===== */
 .plant-alert {
