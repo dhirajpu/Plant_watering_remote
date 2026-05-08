@@ -94,6 +94,7 @@ struct PlantState {
   unsigned long lastWaterIssueMs;
   unsigned long burstStartMs;
   unsigned long currentBurstMs;
+  unsigned long relayNoiseIgnoreUntilMs;
 };
 
 static PlantState plantStates[NUM_PLANTS];
@@ -148,11 +149,12 @@ static const int CHANGE_DELTA = 5;
 static const int SENSOR_SAMPLES = 12;
 static const int WATER_GAIN_CLEAR_PERCENT = 2;
 static const int ADC_RAW_MIN_VALID = 80;
-static const int ADC_RAW_MAX_VALID = 4080;
+static const int ADC_RAW_MAX_VALID = 4095;
 static const int CALIBRATION_RANGE_MARGIN = 200;
 static const int FLOATING_SENSOR_SPREAD_THRESHOLD = 300;
 static const int SENSOR_FAULT_STREAK_LIMIT = 2;
 static const int SENSOR_FAULT_CLEAR_STREAK = 4;
+static const unsigned long RELAY_NOISE_IGNORE_MS = 2500;
 
 // ============ INITIALIZATION FUNCTIONS ============
 
@@ -228,6 +230,7 @@ void initializeSensors()
     plantStates[i].lastWaterIssueMs = 0;
     plantStates[i].burstStartMs = 0;
     plantStates[i].currentBurstMs = 0;
+    plantStates[i].relayNoiseIgnoreUntilMs = 0;
   }
   
   Serial.print("Initialized ");
@@ -335,9 +338,9 @@ void updateSensorState(int plantIndex)
   }
 
   int validMinRaw = wetRaw - CALIBRATION_RANGE_MARGIN;
-  int validMaxRaw = airRaw + CALIBRATION_RANGE_MARGIN;
 
-  bool skipDisconnectCheck = state->pumpRunning;
+  bool withinRelayNoiseWindow = (millis() < state->relayNoiseIgnoreUntilMs);
+  bool skipDisconnectCheck = (state->pumpRunning || withinRelayNoiseWindow);
   if (skipDisconnectCheck)
   {
     state->adcBoundsFault = false;
@@ -346,8 +349,8 @@ void updateSensorState(int plantIndex)
   }
   else
   {
-    state->adcBoundsFault = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw >= ADC_RAW_MAX_VALID);
-    state->rangeFault = (state->filteredRaw < validMinRaw || state->filteredRaw > validMaxRaw);
+    state->adcBoundsFault = (state->filteredRaw <= ADC_RAW_MIN_VALID || state->filteredRaw > ADC_RAW_MAX_VALID);
+    state->rangeFault = (state->filteredRaw < validMinRaw);
     state->floatingFault = (rawSpread >= FLOATING_SENSOR_SPREAD_THRESHOLD);
   }
 
@@ -390,6 +393,7 @@ void stopPump(int plantIndex)
 
   state->pumpRunning = false;
   state->currentBurstMs = 0;
+  state->relayNoiseIgnoreUntilMs = millis() + RELAY_NOISE_IGNORE_MS;
   relayOff(plantIndex);
 
   if (wasRunning)
@@ -416,6 +420,7 @@ void startPumpBurst(int plantIndex)
   state->pumpRunning = true;
   state->currentBurstMs = burstMs;
   state->burstStartMs = millis();
+  state->relayNoiseIgnoreUntilMs = millis() + RELAY_NOISE_IGNORE_MS;
 
   if (state->waterCheckPumpMs == 0)
   {
