@@ -121,6 +121,7 @@ String deviceIp = "offline";
 int currentDisplayPlantIndex = 0;  // Which plant to display on LCD
 int activePlantIndex = -1;         // Single plant currently using shared pump
 bool systemReady = false;           // Flag to track boot completion
+unsigned long globalRelayNoiseIgnoreUntilMs = 0;
 
 // Boot stage tracking
 enum BootStage {
@@ -339,8 +340,10 @@ void updateSensorState(int plantIndex)
 
   int validMinRaw = wetRaw - CALIBRATION_RANGE_MARGIN;
 
+  bool sharedPumpRunning = (activePlantIndex >= 0 && plantStates[activePlantIndex].pumpRunning);
+  bool withinGlobalRelayNoiseWindow = (millis() < globalRelayNoiseIgnoreUntilMs);
   bool withinRelayNoiseWindow = (millis() < state->relayNoiseIgnoreUntilMs);
-  bool skipDisconnectCheck = (state->pumpRunning || withinRelayNoiseWindow);
+  bool skipDisconnectCheck = (state->pumpRunning || sharedPumpRunning || withinRelayNoiseWindow || withinGlobalRelayNoiseWindow);
   if (skipDisconnectCheck)
   {
     state->adcBoundsFault = false;
@@ -394,6 +397,7 @@ void stopPump(int plantIndex)
   state->pumpRunning = false;
   state->currentBurstMs = 0;
   state->relayNoiseIgnoreUntilMs = millis() + RELAY_NOISE_IGNORE_MS;
+  globalRelayNoiseIgnoreUntilMs = millis() + RELAY_NOISE_IGNORE_MS;
   relayOff(plantIndex);
 
   if (wasRunning)
@@ -421,6 +425,7 @@ void startPumpBurst(int plantIndex)
   state->currentBurstMs = burstMs;
   state->burstStartMs = millis();
   state->relayNoiseIgnoreUntilMs = millis() + RELAY_NOISE_IGNORE_MS;
+  globalRelayNoiseIgnoreUntilMs = millis() + RELAY_NOISE_IGNORE_MS;
 
   if (state->waterCheckPumpMs == 0)
   {
