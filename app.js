@@ -112,6 +112,28 @@ function summarizePlants(plants) {
   };
 }
 
+function buildPlantProfilesText(plants) {
+  const safePlants = Array.isArray(plants) ? plants : [];
+  if (!safePlants.length) return '--';
+  return safePlants
+    .map((plant, index) => {
+      const name = (typeof plant.name === 'string' && plant.name.trim()) ? plant.name.trim() : `Plant ${index + 1}`;
+      const low = Number(plant.targetLow);
+      const high = Number(plant.targetHigh);
+      if (Number.isNaN(low) || Number.isNaN(high)) return `${name} (-- )`;
+      return `${name} (${low}-${high})`;
+    })
+    .join(' | ');
+}
+
+function buildWateringRuleHint(plants) {
+  const safePlants = Array.isArray(plants) ? plants : [];
+  if (!safePlants.length) {
+    return 'Watering rule: starts below low threshold and stops at high threshold.';
+  }
+  return 'Watering rule: burst mode is ON. A plant starts below LOW% and stops at HIGH%.';
+}
+
 function renderPlantSummaryCards(plants) {
   const summary = summarizePlants(plants);
 
@@ -308,6 +330,8 @@ async function refreshRemoteStatus() {
       setText('systemPower', 'OFF');
       setText('systemHeartbeat', Number.isFinite(ageSec) ? `Last heartbeat ${ageSec}s ago` : 'Waiting for live update');
       setText('connection', 'System offline');
+      setText('plantProfiles', '--');
+      setText('plantsRuleHint', 'System offline. Waiting for live thresholds from device.');
       renderPlantSummaryCards([]);
       setSystemCardState(false);
       renderOfflinePlants();
@@ -322,6 +346,8 @@ async function refreshRemoteStatus() {
     setText('lastUpdated', new Date().toLocaleTimeString());
 
     const plants = data.plants ?? [];
+    setText('plantProfiles', buildPlantProfilesText(plants));
+    setText('plantsRuleHint', buildWateringRuleHint(plants));
     renderPlantSummaryCards(plants);
 
     setText('systemPower', 'ON');
@@ -342,6 +368,8 @@ async function refreshRemoteStatus() {
     setVerifyingState(false);
     setText('systemPower', 'OFF');
     setText('systemHeartbeat', 'No heartbeat from device');
+    setText('plantProfiles', '--');
+    setText('plantsRuleHint', 'Connection issue. Unable to load live watering thresholds.');
     renderPlantSummaryCards([]);
     setSystemCardState(false);
     renderOfflinePlants();
