@@ -63,6 +63,10 @@
           <span class="label">Pump / Active Watering</span>
           <span class="value small" id="activeWatering">--</span>
         </div>
+        <div class="device-chip">
+          <span class="label">Plant Profiles (Low-High %)</span>
+          <span class="value small profiles" id="plantProfiles">--</span>
+        </div>
       </section>
 
       <!-- WEATHER -->
@@ -90,6 +94,7 @@
       <!-- PLANTS GRID - dynamically built by app.js -->
       <section class="plants-section">
         <h2 class="section-title">All Plants</h2>
+        <p class="hint" id="plantsRuleHint">Watering rule: starts below low threshold and stops at high threshold.</p>
         <div class="plants-grid" id="plantsGrid">
           <div class="plant-card-placeholder">Loading plant data...</div>
         </div>
