@@ -592,6 +592,14 @@ body.system-off-mode .camera-card {
   gap: 4px;
 }
 
+.value.profiles {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  font-weight: 600;
+  word-break: break-word;
+}
+
 /* ===== PLANTS SECTION ===== */
 .plants-section {
   margin: 22px 0 0;
