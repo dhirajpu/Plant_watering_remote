@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plant Life Care V2</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="page">
+    <section class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Smart Watering V2</p>
+          <h1>Plant Life Care</h1>
+          <p class="subtitle">Live monitoring, safe manual watering, plant modes, calibration, settings, diagnostics and watering history.</p>
+        </div>
+        <div class="hero-actions">
+          <span id="systemBadge" class="badge neutral">WAITING</span>
+          <button id="emergencyBtn" class="danger">Emergency Stop</button>
+          <button id="resumeBtn" class="secondary" hidden>Resume System</button>
+        </div>
+      </header>
+
+      <section class="summary-grid">
+        <article class="summary-card"><span>System</span><strong id="systemStatus">Waiting...</strong><small id="heartbeat">No heartbeat yet</small></article>
+        <article class="summary-card"><span>Pump / Active Plant</span><strong id="activePlant">--</strong><small id="wateringAllowed">--</small></article>
+        <article class="summary-card"><span>Tank</span><strong id="tankStatus">--</strong><small id="tankHint">--</small></article>
+        <article class="summary-card"><span>Flow</span><strong id="flowStatus">--</strong><small id="flowHint">--</small></article>
+        <article class="summary-card"><span>Wi-Fi</span><strong id="wifiRssi">--</strong><small id="deviceIp">--</small></article>
+        <article class="summary-card"><span>Restart</span><strong id="resetReason">--</strong><small id="uptime">--</small></article>
+      </section>
+
+      <section class="section">
+        <div class="section-head"><div><h2>Plants</h2><p>Each plant can run in AUTO, MANUAL or DISABLED mode.</p></div></div>
+        <div id="plantsGrid" class="plants-grid"><div class="empty">Waiting for V2 firmware data...</div></div>
+      </section>
+
+      <section class="section split">
+        <div>
+          <div class="section-head"><div><h2>Moisture History</h2><p>Recent telemetry from the V2 controller.</p></div></div>
+          <div id="chart" class="chart"><div class="empty">No telemetry yet.</div></div>
+        </div>
+        <div>
+          <div class="section-head"><div><h2>Watering History</h2><p>Latest watering sessions and results.</p></div></div>
+          <div id="history" class="history"><div class="empty">No watering history yet.</div></div>
+        </div>
+      </section>
+
+      <section class="section diagnostics">
+        <div class="section-head"><div><h2>Diagnostics</h2><p>Useful when checking power-return, sensors and safety state.</p></div></div>
+        <div id="diagnosticsGrid" class="diagnostics-grid"></div>
+      </section>
+
+      <div id="toast" class="toast" hidden></div>
+    </section>
+  </main>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
