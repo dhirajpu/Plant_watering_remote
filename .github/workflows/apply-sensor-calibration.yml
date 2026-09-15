@@ -1,0 +1,68 @@
+name: Apply plant sensor calibration
+
+on:
+  push:
+    paths:
+      - ".github/sensor-calibration-trigger"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-calibration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update raw calibration and add NVS migration
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path("Plant_Watering_Smart_V2_OTA.ino")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = {
+              '  {"Aglaonema", 4000, 1750, 35, 60, 3000, 100,': '  {"Aglaonema", 3300, 1150, 35, 60, 3000, 100,',
+              '  {"Jade Plant", 3500, 1150, 15, 30, 2500, 85,': '  {"Jade Plant", 3400, 1200, 15, 30, 2500, 85,',
+              '  {"ZZ Plant", 3500, 1150, 20, 35, 2500, 85,': '  {"ZZ Plant", 3400, 1250, 20, 35, 2500, 85,',
+              '  {"Monstera", 3500, 1150, 35, 45, 3000, 100,': '  {"Monstera", 2600, 1200, 35, 45, 3000, 100,',
+              '  {"Bamboo", 3500, 1150, 10, 40, 3000, 100,': '  {"Bamboo", 3400, 1250, 10, 40, 3000, 100,',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f"Expected calibration line not found: {old}")
+              text = text.replace(old, new, 1)
+
+          marker = "PlantState states[NUM_PLANTS];"
+          if "SENSOR_CALIBRATION_VERSION = 2" not in text:
+              calibration = '''// Increment whenever the factory raw calibration endpoints are intentionally changed.\n// On upgrade, only airRaw/wetRaw are replaced; plant names, targets, timing and modes are preserved.\nstatic const uint8_t SENSOR_CALIBRATION_VERSION = 2;\n\n'''
+              if marker not in text:
+                  raise SystemExit("Could not find PlantState marker")
+              text = text.replace(marker, calibration + marker, 1)
+
+          function_marker = "uint64_t epochMs() {"
+          if "void applySensorCalibrationVersion()" not in text:
+              function = '''void applySensorCalibrationVersion() {\n  uint8_t savedVersion = prefs.getUChar("sensorCalVer", 0);\n  if (savedVersion == SENSOR_CALIBRATION_VERSION) return;\n\n  const int defaultAirRaw[NUM_PLANTS] = {3300, 3400, 3400, 2600, 3400};\n  const int defaultWetRaw[NUM_PLANTS] = {1150, 1200, 1250, 1200, 1250};\n\n  Serial.println("Applying updated plant sensor calibration...");\n  for (int i = 0; i < NUM_PLANTS; i++) {\n    plants[i].airRaw = defaultAirRaw[i];\n    plants[i].wetRaw = defaultWetRaw[i];\n    savePlantConfig(i);\n    Serial.print(plants[i].name);\n    Serial.print(" calibration: dry=");\n    Serial.print(plants[i].airRaw);\n    Serial.print(" wet=");\n    Serial.println(plants[i].wetRaw);\n  }\n  prefs.putUChar("sensorCalVer", SENSOR_CALIBRATION_VERSION);\n}\n\n'''
+              if function_marker not in text:
+                  raise SystemExit("Could not find persistence function marker")
+              text = text.replace(function_marker, function + function_marker, 1)
+
+          setup_marker = "  for(int i=0;i<NUM_PLANTS;i++)loadPlantConfig(i);"
+          if "  applySensorCalibrationVersion();" not in text:
+              if setup_marker not in text:
+                  raise SystemExit("Could not find setup calibration load marker")
+              text = text.replace(setup_marker, setup_marker + "\n  applySensorCalibrationVersion();", 1)
+
+          path.write_text(text, encoding="utf-8")
+
+      - name: Commit calibration update and remove one-shot workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/sensor-calibration-trigger .github/workflows/apply-sensor-calibration.yml
+          git add Plant_Watering_Smart_V2_OTA.ino
+          git commit -m "Calibrate plant moisture raw sensor ranges"
+          git push
