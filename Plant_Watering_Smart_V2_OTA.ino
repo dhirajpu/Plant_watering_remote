@@ -138,12 +138,16 @@ struct PlantState {
 // Bamboo     : air=3500, wet=1150, target=10-40%, burst=3000ms
 // burstMl values are retained as safe defaults for the optional flow-sensor path.
 PlantConfig plants[NUM_PLANTS] = {
-  {"Aglaonema", 4000, 1750, 35, 60, 3000, 100, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO},
-  {"Jade Plant", 3500, 1150, 15, 30, 2500, 85, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO},
-  {"ZZ Plant", 3500, 1150, 20, 35, 2500, 85, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO},
-  {"Monstera", 3500, 1150, 35, 45, 3000, 100, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO},
-  {"Bamboo", 3500, 1150, 10, 40, 3000, 100, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO}
+  {"Aglaonema", 3300, 1150, 35, 60, 3000, 100, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO},
+  {"Jade Plant", 3400, 1200, 15, 30, 2500, 85, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO},
+  {"ZZ Plant", 3400, 1250, 20, 35, 2500, 85, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO},
+  {"Monstera", 2600, 1200, 35, 45, 3000, 100, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO},
+  {"Bamboo", 3400, 1250, 10, 40, 3000, 100, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO}
 };
+
+// Increment whenever the factory raw calibration endpoints are intentionally changed.
+// On upgrade, only airRaw/wetRaw are replaced; plant names, targets, timing and modes are preserved.
+static const uint8_t SENSOR_CALIBRATION_VERSION = 2;
 
 PlantState states[NUM_PLANTS];
 LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLS, LCD_ROWS);
@@ -259,6 +263,27 @@ void loadPlantConfig(int i) {
   plants[i].soakMs = constrain(plants[i].soakMs, 10000UL, 30UL * 60UL * 1000UL);
   plants[i].minIntervalMs = constrain(plants[i].minIntervalMs, 60000UL, 7UL * 24UL * 60UL * 60UL * 1000UL);
   if (plants[i].mode > MODE_DISABLED) plants[i].mode = MODE_AUTO;
+}
+
+void applySensorCalibrationVersion() {
+  uint8_t savedVersion = prefs.getUChar("sensorCalVer", 0);
+  if (savedVersion == SENSOR_CALIBRATION_VERSION) return;
+
+  const int defaultAirRaw[NUM_PLANTS] = {3300, 3400, 3400, 2600, 3400};
+  const int defaultWetRaw[NUM_PLANTS] = {1150, 1200, 1250, 1200, 1250};
+
+  Serial.println("Applying updated plant sensor calibration...");
+  for (int i = 0; i < NUM_PLANTS; i++) {
+    plants[i].airRaw = defaultAirRaw[i];
+    plants[i].wetRaw = defaultWetRaw[i];
+    savePlantConfig(i);
+    Serial.print(plants[i].name);
+    Serial.print(" calibration: dry=");
+    Serial.print(plants[i].airRaw);
+    Serial.print(" wet=");
+    Serial.println(plants[i].wetRaw);
+  }
+  prefs.putUChar("sensorCalVer", SENSOR_CALIBRATION_VERSION);
 }
 
 uint64_t epochMs() { time_t now = time(nullptr); if (now < 1700000000) return 0; return (uint64_t)now * 1000ULL; }
@@ -416,7 +441,8 @@ void updateClock(){if(timeSynced)return;time_t now=time(nullptr);if(now>=1700000
 void setup(){
   forceAllOutputsOff();Serial.begin(115200);delay(100);Serial.println();Serial.println("========================================");Serial.println(FIRMWARE_VERSION);Serial.print("Reset reason: ");Serial.println(resetReasonText());Serial.println("Pump and valves forced OFF.");Serial.println("========================================");
   delay(POWER_STABILIZE_MS);bootMs=millis();prefs.begin("plantV2",false);emergencyStop=prefs.getBool("eStop",false);lastCommandId=prefs.getString("lastCmd","");lastConfigVersion=prefs.getString("cfgVersion","");
-  for(int i=0;i<NUM_PLANTS;i++)loadPlantConfig(i);analogReadResolution(12);
+  for(int i=0;i<NUM_PLANTS;i++)loadPlantConfig(i);
+  applySensorCalibrationVersion();analogReadResolution(12);
   for(int i=0;i<NUM_PLANTS;i++){states[i]={};states[i].previousRaw=-1;states[i].lastSensorChangeMs=millis();states[i].hourWindowStartMs=millis();states[i].dayWindowStartMs=millis();loadRuntimeLimits(i);}
   if(TANK_SENSOR_ENABLED)pinMode(TANK_FLOAT_PIN,INPUT_PULLUP);if(FLOW_SENSOR_ENABLED){pinMode(FLOW_SENSOR_PIN,INPUT_PULLUP);attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN),onFlowPulse,FALLING);}
   Wire.begin(SDA_PIN,SCL_PIN);Wire.setClock(50000);lcd.init();lcd.backlight();lcd.clear();lcdLine(0,"Plant Care V2");lcdLine(1,"Safe boot...");
