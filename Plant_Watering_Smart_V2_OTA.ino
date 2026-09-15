@@ -34,14 +34,14 @@
 */
 
 // ========================= NETWORK =========================
-static const char *WIFI_SSID = "Airtel_Dhiraj";
-static const char *WIFI_PASSWORD = "Airtel@9798";
+static const char *WIFI_SSID = "";
+static const char *WIFI_PASSWORD = "";
 static const char *FIREBASE_BASE_URL = "https://vernal-catfish-196407.firebaseio.com";
 static const char *DEVICE_ROOT = "/plantMonitor/v2";
 static const char *FIREBASE_AUTH = "";
 
 // Local OTA security. Change this before flashing.
-static const char *OTA_PASSWORD = "357896";
+static const char *OTA_PASSWORD = "";
 static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.0";
 static const char *OTA_USER = "admin";
 
