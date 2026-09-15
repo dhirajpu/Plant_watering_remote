@@ -1,4 +1,4 @@
-name: Apply web OTA response fix
+name: Apply OTA and manual watering fix
 
 on:
   push:
@@ -15,15 +15,17 @@ jobs:
       - name: Checkout main
         uses: actions/checkout@v4
 
-      - name: Patch web OTA handlers
+      - name: Patch firmware
         shell: python
         run: |
           from pathlib import Path
           p = Path('Plant_Watering_Smart_V2_OTA.ino')
           s = p.read_text(encoding='utf-8')
+
+          # Fix 1: browser web OTA must send its final response from the POST
+          # handler, not from the multipart upload callback.
           start = s.index('// ========================= LOCAL OTA =========================')
           end = s.index('// ========================= LCD / WIFI / TIME =========================', start)
-
           replacement = r'''// ========================= LOCAL OTA =========================
 // Web OTA upload state. The multipart callback only writes the firmware.
 // The HTTP_POST handler sends the final response after upload processing,
@@ -66,19 +68,14 @@ void handleUpdateUpload(){
   HTTPUpload&u=server.upload();
   if(u.status==UPLOAD_FILE_START){
     otaUploadSuccess=false;otaUploadFailed=false;otaUploadBytes=0;otaUploadTotal=0;
-    otaSafeStart();
-    otaUploadTotal=u.totalSize;
+    otaSafeStart();otaUploadTotal=u.totalSize;
     Serial.print("Web OTA upload started: ");Serial.println(u.filename);
-    if(!Update.begin(UPDATE_SIZE_UNKNOWN)){
-      Update.printError(Serial);otaUploadFailed=true;
-    }
+    if(!Update.begin(UPDATE_SIZE_UNKNOWN)){Update.printError(Serial);otaUploadFailed=true;}
   }else if(u.status==UPLOAD_FILE_WRITE){
     otaUploadBytes+=u.currentSize;
     if(!otaUploadFailed&&!Update.hasError()){
       size_t written=Update.write(u.buf,u.currentSize);
-      if(written!=u.currentSize){
-        Update.printError(Serial);otaUploadFailed=true;
-      }
+      if(written!=u.currentSize){Update.printError(Serial);otaUploadFailed=true;}
     }
     if(otaUploadTotal>0)Serial.printf("Web OTA: %u%%\n",(unsigned)((otaUploadBytes*100UL)/otaUploadTotal));
     else Serial.printf("Web OTA: %u bytes\n",(unsigned)otaUploadBytes);
@@ -88,26 +85,20 @@ void handleUpdateUpload(){
       Serial.printf("Web OTA upload complete: %u bytes\n",(unsigned)otaUploadBytes);
     }else{
       Update.printError(Serial);otaUploadFailed=true;otaUploadSuccess=false;
-      otaInProgress=false;systemReady=true;bootMs=millis();
-      forceAllOutputsOff();
+      otaInProgress=false;systemReady=true;bootMs=millis();forceAllOutputsOff();
       Serial.println("Web OTA update failed; running firmware was not replaced.");
     }
   }
 }
 
 void handleUpdateComplete(){
-  if(!server.authenticate(OTA_USER,OTA_PASSWORD))return server.requestAuthentication();
+  if(!server.authenticate(OTA_USER,OTA_PASSWORD)){server.requestAuthentication();return;}
   if(otaUploadSuccess){
-    server.send(200,"text/html","<!doctype html><html><body><h2>OTA update successful</h2>"
-                "<p>The firmware was written successfully.</p><p>The ESP32 will reboot now.</p></body></html>");
-    delay(1000);
-    ESP.restart();
-    return;
+    server.send(200,"text/html","<!doctype html><html><body><h2>OTA update successful</h2><p>The firmware was written successfully.</p><p>The ESP32 will reboot now.</p></body></html>");
+    delay(1000);ESP.restart();return;
   }
   if(otaUploadFailed){
-    server.send(500,"text/html","<!doctype html><html><body><h2>OTA update failed</h2>"
-                "<p>The firmware update was not completed. The existing firmware remains installed.</p>"
-                "<p>Check the ESP32 Serial Monitor for the Update error and retry with a valid .bin file.</p></body></html>");
+    server.send(500,"text/html","<!doctype html><html><body><h2>OTA update failed</h2><p>The firmware update was not completed. The existing firmware remains installed.</p><p>Check the ESP32 Serial Monitor for the Update error and retry with a valid .bin file.</p></body></html>");
     return;
   }
   server.send(400,"text/plain","No firmware upload was received.");
@@ -117,8 +108,8 @@ void setupLocalOta(){
   ArduinoOTA.setHostname("plant-watering-v2");ArduinoOTA.setPassword(OTA_PASSWORD);
   ArduinoOTA.onStart([](){otaSafeStart();Serial.println("OTA start: outputs OFF");});
   ArduinoOTA.onEnd([](){Serial.println("OTA complete; rebooting");});
-  ArduinoOTA.onProgress([](unsigned int p,unsigned int t){Serial.printf("OTA %u%%\\r",(p*100)/t);});
-  ArduinoOTA.onError([](ota_error_t e){Serial.printf("OTA error %u; outputs remain OFF\\n",e);otaInProgress=false;});ArduinoOTA.begin();
+  ArduinoOTA.onProgress([](unsigned int p,unsigned int t){Serial.printf("OTA %u%%\r",(p*100)/t);});
+  ArduinoOTA.onError([](ota_error_t e){Serial.printf("OTA error %u; outputs remain OFF\n",e);otaInProgress=false;systemReady=true;forceAllOutputsOff();});ArduinoOTA.begin();
   server.on("/update",HTTP_GET,handleUpdatePage);
   server.on("/update",HTTP_POST,handleUpdateComplete,handleUpdateUpload);
   server.on("/",HTTP_GET,[](){if(!server.authenticate(OTA_USER,OTA_PASSWORD))return server.requestAuthentication();server.send(200,"text/plain","Plant Watering V2 local OTA. Open /update to upload a .bin firmware.");});
@@ -126,14 +117,32 @@ void setupLocalOta(){
 }
 
 '''
-          p.write_text(s[:start] + replacement + s[end:], encoding='utf-8')
+          s = s[:start] + replacement + s[end:]
 
-      - name: Verify patch
+          # Fix 2: issuedAtEpochMs is a 13-digit value. On ESP32, Arduino long
+          # is 32-bit, so String::toInt() overflows and every Water Now command
+          # can be rejected as expired. Parse it as uint64_t instead.
+          marker = 'long jsonLongValue(const String &json, const String &key, long fallback) { String v = jsonStringValue(json, key, ""); if (!v.length() || v == "null") return fallback; return v.toInt(); }'
+          new_marker = marker + '\nuint64_t jsonUint64Value(const String &json, const String &key, uint64_t fallback) { String v = jsonStringValue(json, key, ""); if (!v.length() || v == "null") return fallback; return strtoull(v.c_str(), nullptr, 10); }'
+          if marker not in s:
+              raise SystemExit('jsonLongValue marker not found')
+          s = s.replace(marker, new_marker, 1)
+
+          old = 'bool commandTimestampValid(const String &json){uint64_t issued=(uint64_t)jsonLongValue(json,"issuedAtEpochMs",0);if(!issued)return false;uint64_t now=epochMs();if(!now)return false;return issued<=now+REMOTE_COMMAND_FUTURE_SKEW_MS && now-issued<=REMOTE_COMMAND_MAX_AGE_MS;}'
+          new = 'bool commandTimestampValid(const String &json){uint64_t issued=jsonUint64Value(json,"issuedAtEpochMs",0);if(!issued)return false;uint64_t now=epochMs();if(!now)return false;if(issued>now+REMOTE_COMMAND_FUTURE_SKEW_MS)return false;return now-issued<=REMOTE_COMMAND_MAX_AGE_MS;}'
+          if old not in s:
+              raise SystemExit('commandTimestampValid marker not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+      - name: Verify fixes
         shell: bash
         run: |
           grep -q 'void handleUpdateComplete()' Plant_Watering_Smart_V2_OTA.ino
           grep -q 'x.upload.onprogress' Plant_Watering_Smart_V2_OTA.ino
           grep -q 'server.on("/update",HTTP_POST,handleUpdateComplete,handleUpdateUpload)' Plant_Watering_Smart_V2_OTA.ino
+          grep -q 'uint64_t jsonUint64Value' Plant_Watering_Smart_V2_OTA.ino
+          grep -q 'issued=jsonUint64Value(json,"issuedAtEpochMs",0)' Plant_Watering_Smart_V2_OTA.ino
           test "$(grep -c 'void handleUpdateComplete()' Plant_Watering_Smart_V2_OTA.ino)" = "1"
 
       - name: Remove trigger and commit
@@ -143,5 +152,5 @@ void setupLocalOta(){
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add Plant_Watering_Smart_V2_OTA.ino .github/ota-fix-trigger .github/workflows/apply-ota-fix.yml
-          git commit -m 'fix: repair web OTA upload confirmation and progress'
+          git commit -m 'fix: repair manual watering command and web OTA'
           git push
