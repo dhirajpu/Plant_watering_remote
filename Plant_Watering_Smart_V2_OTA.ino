@@ -99,7 +99,6 @@ static const int SENSOR_MAX_VALID = 4095;
 static const int SENSOR_CHANGE_DELTA = 4;
 static const unsigned long SENSOR_STALE_MS = 6UL * 60UL * 60UL * 1000UL;
 
-// ========================= TYPES =========================
 enum PlantMode : uint8_t { MODE_AUTO = 0, MODE_MANUAL = 1, MODE_DISABLED = 2 };
 enum StopReason : uint8_t {
   STOP_NONE = 0, STOP_TARGET_REACHED, STOP_BURST_COMPLETE, STOP_SESSION_LIMIT,
@@ -129,14 +128,6 @@ struct PlantState {
   uint32_t lastDeliveredMl; uint32_t sessionDeliveredMl; StopReason lastStopReason;
 };
 
-// ========================= PLANT DEFAULTS =========================
-// Requested plant list:
-// Aglaonema  : air=4000, wet=1750, target=35-60%, burst=3000ms
-// Jade Plant : air=3500, wet=1150, target=15-30%, burst=2500ms
-// ZZ Plant   : air=3500, wet=1150, target=20-35%, burst=2500ms
-// Monstera   : air=3500, wet=1150, target=35-45%, burst=3000ms
-// Bamboo     : air=3500, wet=1150, target=10-40%, burst=3000ms
-// burstMl values are retained as safe defaults for the optional flow-sensor path.
 PlantConfig plants[NUM_PLANTS] = {
   {"Aglaonema", 3300, 1150, 35, 60, 3000, 100, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO},
   {"Jade Plant", 3400, 1200, 15, 30, 2500, 85, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO},
@@ -145,10 +136,7 @@ PlantConfig plants[NUM_PLANTS] = {
   {"Bamboo", 3400, 1250, 10, 40, 3000, 100, DEFAULT_SOAK_MS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_BURST_MS, DEFAULT_MAX_SESSION_MS, DEFAULT_MAX_HOURLY_MS, DEFAULT_MAX_DAILY_MS, MODE_AUTO}
 };
 
-// Increment whenever the factory raw calibration endpoints are intentionally changed.
-// On upgrade, only airRaw/wetRaw are replaced; plant names, targets, timing and modes are preserved.
 static const uint8_t SENSOR_CALIBRATION_VERSION = 2;
-
 PlantState states[NUM_PLANTS];
 LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLS, LCD_ROWS);
 WiFiClientSecure secureClient;
@@ -224,7 +212,6 @@ String jsonStringValue(const String &json, const String &key, const String &fall
 }
 long jsonLongValue(const String &json, const String &key, long fallback) { String v = jsonStringValue(json, key, ""); if (!v.length() || v == "null") return fallback; return v.toInt(); }
 
-// ========================= OUTPUT SAFETY =========================
 void forceAllOutputsOff() {
   pinMode(PUMP_PIN, OUTPUT); digitalWrite(PUMP_PIN, RELAY_OFF);
   for (int i = 0; i < NUM_PLANTS; i++) { pinMode(VALVE_PINS[i], OUTPUT); digitalWrite(VALVE_PINS[i], RELAY_OFF); }
@@ -242,7 +229,6 @@ void updateTankState() {
   if (tankEmpty && activePlant >= 0) emergencyHardwareStop(STOP_TANK_EMPTY);
 }
 
-// ========================= PERSISTENCE =========================
 String keyFor(int i, const char *suffix) { return "p" + String(i) + suffix; }
 void savePlantConfig(int i) {
   prefs.putString(keyFor(i,"name").c_str(), plants[i].name); prefs.putInt(keyFor(i,"air").c_str(), plants[i].airRaw);
@@ -268,40 +254,27 @@ void loadPlantConfig(int i) {
 void applySensorCalibrationVersion() {
   uint8_t savedVersion = prefs.getUChar("sensorCalVer", 0);
   if (savedVersion == SENSOR_CALIBRATION_VERSION) return;
-
   const int defaultAirRaw[NUM_PLANTS] = {3300, 3400, 3400, 2600, 3400};
   const int defaultWetRaw[NUM_PLANTS] = {1150, 1200, 1250, 1200, 1250};
-
   Serial.println("Applying updated plant sensor calibration...");
   for (int i = 0; i < NUM_PLANTS; i++) {
-    plants[i].airRaw = defaultAirRaw[i];
-    plants[i].wetRaw = defaultWetRaw[i];
-    savePlantConfig(i);
-    Serial.print(plants[i].name);
-    Serial.print(" calibration: dry=");
-    Serial.print(plants[i].airRaw);
-    Serial.print(" wet=");
-    Serial.println(plants[i].wetRaw);
+    plants[i].airRaw = defaultAirRaw[i]; plants[i].wetRaw = defaultWetRaw[i]; savePlantConfig(i);
+    Serial.print(plants[i].name); Serial.print(" calibration: dry="); Serial.print(plants[i].airRaw); Serial.print(" wet="); Serial.println(plants[i].wetRaw);
   }
   prefs.putUChar("sensorCalVer", SENSOR_CALIBRATION_VERSION);
 }
 
 uint64_t epochMs() { time_t now = time(nullptr); if (now < 1700000000) return 0; return (uint64_t)now * 1000ULL; }
 void loadRuntimeLimits(int i) {
-  uint64_t now = epochMs(); uint64_t hourStart = prefs.getULong64(keyFor(i,"hrStart").c_str(), 0);
-  uint64_t dayStart = prefs.getULong64(keyFor(i,"dayStart").c_str(), 0);
-  states[i].hourlyPumpMs = prefs.getULong(keyFor(i,"hrMs").c_str(), 0);
-  states[i].dailyPumpMs = prefs.getULong(keyFor(i,"dayMs").c_str(), 0);
+  uint64_t now = epochMs(); uint64_t hourStart = prefs.getULong64(keyFor(i,"hrStart").c_str(), 0); uint64_t dayStart = prefs.getULong64(keyFor(i,"dayStart").c_str(), 0);
+  states[i].hourlyPumpMs = prefs.getULong(keyFor(i,"hrMs").c_str(), 0); states[i].dailyPumpMs = prefs.getULong(keyFor(i,"dayMs").c_str(), 0);
   if (now && hourStart && now - hourStart >= 3600000ULL) { states[i].hourlyPumpMs = 0; prefs.putULong64(keyFor(i,"hrStart").c_str(), now); prefs.putULong(keyFor(i,"hrMs").c_str(), 0); }
   if (now && dayStart && now - dayStart >= 86400000ULL) { states[i].dailyPumpMs = 0; prefs.putULong64(keyFor(i,"dayStart").c_str(), now); prefs.putULong(keyFor(i,"dayMs").c_str(), 0); }
   states[i].hourWindowStartMs = millis(); states[i].dayWindowStartMs = millis();
 }
 void persistRuntimeLimits(int i) {
   uint64_t now = epochMs();
-  if (now) {
-    uint64_t hs = prefs.getULong64(keyFor(i,"hrStart").c_str(), 0); uint64_t ds = prefs.getULong64(keyFor(i,"dayStart").c_str(), 0);
-    if (!hs) prefs.putULong64(keyFor(i,"hrStart").c_str(), now); if (!ds) prefs.putULong64(keyFor(i,"dayStart").c_str(), now);
-  }
+  if (now) { uint64_t hs = prefs.getULong64(keyFor(i,"hrStart").c_str(), 0); uint64_t ds = prefs.getULong64(keyFor(i,"dayStart").c_str(), 0); if (!hs) prefs.putULong64(keyFor(i,"hrStart").c_str(), now); if (!ds) prefs.putULong64(keyFor(i,"dayStart").c_str(), now); }
   prefs.putULong(keyFor(i,"hrMs").c_str(), states[i].hourlyPumpMs); prefs.putULong(keyFor(i,"dayMs").c_str(), states[i].dailyPumpMs);
   uint64_t last = epochMs(); if (last) prefs.putULong64(keyFor(i,"lastWater").c_str(), last);
 }
@@ -309,8 +282,7 @@ void refreshTimeWindows(int i) {
   uint64_t now = epochMs();
   if (now) {
     uint64_t hs = prefs.getULong64(keyFor(i,"hrStart").c_str(), 0); uint64_t ds = prefs.getULong64(keyFor(i,"dayStart").c_str(), 0);
-    if (!hs) { prefs.putULong64(keyFor(i,"hrStart").c_str(), now); hs = now; }
-    if (!ds) { prefs.putULong64(keyFor(i,"dayStart").c_str(), now); ds = now; }
+    if (!hs) { prefs.putULong64(keyFor(i,"hrStart").c_str(), now); hs = now; } if (!ds) { prefs.putULong64(keyFor(i,"dayStart").c_str(), now); ds = now; }
     if (now - hs >= 3600000ULL) { states[i].hourlyPumpMs = 0; prefs.putULong64(keyFor(i,"hrStart").c_str(), now); prefs.putULong(keyFor(i,"hrMs").c_str(), 0); }
     if (now - ds >= 86400000ULL) { states[i].dailyPumpMs = 0; prefs.putULong64(keyFor(i,"dayStart").c_str(), now); prefs.putULong(keyFor(i,"dayMs").c_str(), 0); }
   } else {
@@ -319,7 +291,6 @@ void refreshTimeWindows(int i) {
   }
 }
 
-// ========================= SENSOR =========================
 int readAverageRaw(int pin) { long total = 0; for (int s=0;s<SENSOR_SAMPLES;s++){ total += analogRead(pin); delay(2); } return total/SENSOR_SAMPLES; }
 int rawToPercent(int i, int raw) { if (plants[i].airRaw <= plants[i].wetRaw + 10) return 0; int c=constrain(raw,plants[i].wetRaw,plants[i].airRaw); return map(c,plants[i].airRaw,plants[i].wetRaw,0,100); }
 void updatePlantSensor(int i) {
@@ -331,7 +302,6 @@ void updatePlantSensor(int i) {
 }
 bool allPlantsBootValidated(){for(int i=0;i<NUM_PLANTS;i++)if(states[i].validBootScans<REQUIRED_VALID_BOOT_SCANS)return false;return true;}
 
-// ========================= WATER VOLUME / SAFETY =========================
 uint32_t pulsesToMl(uint32_t p){if(!FLOW_SENSOR_ENABLED||FLOW_PULSES_PER_LITER<=0)return 0;return(uint32_t)(((float)p/FLOW_PULSES_PER_LITER)*1000.0f);}
 uint32_t currentBurstMl(int i){return FLOW_SENSOR_ENABLED?pulsesToMl(flowPulseCount-states[i].burstStartPulses):0;}
 uint32_t currentSessionMl(int i){return FLOW_SENSOR_ENABLED?pulsesToMl(flowPulseCount-states[i].sessionStartPulses):0;}
@@ -345,21 +315,13 @@ bool canStartPlant(int i,bool manual){
 }
 void openValveThenPump(int i){for(int p=0;p<NUM_PLANTS;p++)if(p!=i)digitalWrite(VALVE_PINS[p],RELAY_OFF);digitalWrite(VALVE_PINS[i],RELAY_ON);delay(VALVE_PREOPEN_MS);digitalWrite(PUMP_PIN,RELAY_ON);}
 void publishWateringHistory(int i,StopReason reason,unsigned long duration,uint32_t ml){
-  String j="{";j+="\"plantIndex\":"+String(i)+",";j+="\"plantName\":\""+plants[i].name+"\",";
-  uint64_t now=epochMs();j+="\"eventEpochMs\":"+String((unsigned long long)now)+",";j+="\"eventUptimeMs\":"+String(millis())+",";
-  j+="\"durationMs\":"+String(duration)+",";j+="\"deliveredMl\":"+String(ml)+",";j+="\"moistureStart\":"+String(states[i].moistureAtSessionStart)+",";
-  j+="\"moistureEnd\":"+String(states[i].moisture)+",";j+="\"reason\":\""+stopReasonText(reason)+"\",";j+="\"manual\":"+boolJson(states[i].manualRequest)+"}";httpPostJson("/history/watering",j);
+  String j="{";j+="\"plantIndex\":"+String(i)+",";j+="\"plantName\":\""+plants[i].name+"\",";uint64_t now=epochMs();j+="\"eventEpochMs\":"+String((unsigned long long)now)+",";j+="\"eventUptimeMs\":"+String(millis())+",";j+="\"durationMs\":"+String(duration)+",";j+="\"deliveredMl\":"+String(ml)+",";j+="\"moistureStart\":"+String(states[i].moistureAtSessionStart)+",";j+="\"moistureEnd\":"+String(states[i].moisture)+",";j+="\"reason\":\""+stopReasonText(reason)+"\",";j+="\"manual\":"+boolJson(states[i].manualRequest)+"}";httpPostJson("/history/watering",j);
 }
 void finishPlantSession(int i,StopReason reason){
-  PlantState&s=states[i];uint32_t ml=FLOW_SENSOR_ENABLED?currentSessionMl(i):0;s.lastDeliveredMl=ml;s.sessionDeliveredMl=ml;
-  s.lastWateredMs=millis();s.lastStopReason=reason;s.responseDeadlineMs=0;publishWateringHistory(i,reason,s.sessionPumpMs,ml);persistRuntimeLimits(i);
-  s.manualRequest=false;s.manualRequestedMl=0;s.manualRequestedMs=0;s.sessionPumpMs=0;s.sessionStartMs=0;s.soaking=false;activePlant=-1;
+  PlantState&s=states[i];uint32_t ml=FLOW_SENSOR_ENABLED?currentSessionMl(i):0;s.lastDeliveredMl=ml;s.sessionDeliveredMl=ml;s.lastWateredMs=millis();s.lastStopReason=reason;s.responseDeadlineMs=0;publishWateringHistory(i,reason,s.sessionPumpMs,ml);persistRuntimeLimits(i);s.manualRequest=false;s.manualRequestedMl=0;s.manualRequestedMs=0;s.sessionPumpMs=0;s.sessionStartMs=0;s.soaking=false;activePlant=-1;
 }
 void stopBurst(int i,StopReason reason,bool finishSession){
-  PlantState&s=states[i];if(!s.watering){if(finishSession)finishPlantSession(i,reason);return;}
-  unsigned long d=millis()-s.burstStartMs;s.sessionPumpMs+=d;s.hourlyPumpMs+=d;s.dailyPumpMs+=d;
-  digitalWrite(PUMP_PIN,RELAY_OFF);delay(VALVE_POSTPUMP_MS);digitalWrite(VALVE_PINS[i],RELAY_OFF);s.watering=false;s.lastStopReason=reason;s.moistureAfterLastBurst=s.moisture;
-  if(finishSession)finishPlantSession(i,reason);else{s.soaking=true;s.soakUntilMs=millis()+plants[i].soakMs;}
+  PlantState&s=states[i];if(!s.watering){if(finishSession)finishPlantSession(i,reason);return;}unsigned long d=millis()-s.burstStartMs;s.sessionPumpMs+=d;s.hourlyPumpMs+=d;s.dailyPumpMs+=d;digitalWrite(PUMP_PIN,RELAY_OFF);delay(VALVE_POSTPUMP_MS);digitalWrite(VALVE_PINS[i],RELAY_OFF);s.watering=false;s.lastStopReason=reason;s.moistureAfterLastBurst=s.moisture;if(finishSession)finishPlantSession(i,reason);else{s.soaking=true;s.soakUntilMs=millis()+plants[i].soakMs;}
 }
 void startPlantSession(int i,bool manual){PlantState&s=states[i];if(!canStartPlant(i,manual))return;activePlant=i;s.sessionStartMs=millis();s.sessionPumpMs=0;s.moistureAtSessionStart=s.moisture;s.sessionStartPulses=flowPulseCount;s.soaking=false;s.responseDeadlineMs=manual?0:millis()+WATER_RESPONSE_TIMEOUT_MS;s.lastStopReason=STOP_NONE;}
 void startBurst(int i){
@@ -377,67 +339,120 @@ void evaluateActivePlant(){
     if(s.sessionPumpMs+run>=c.maxSessionMs){stopBurst(i,STOP_SESSION_LIMIT,true);return;}if(s.hourlyPumpMs+run>=c.maxHourlyMs){stopBurst(i,STOP_HOURLY_LIMIT,true);return;}if(s.dailyPumpMs+run>=c.maxDailyMs){stopBurst(i,STOP_DAILY_LIMIT,true);return;}
     if(manualTargetReached(i)){stopBurst(i,STOP_MANUAL_COMPLETE,true);return;}if(normalBurstReached(i)){stopBurst(i,STOP_BURST_COMPLETE,false);return;}return;
   }
-  if(s.soaking){if(millis()<s.soakUntilMs)return;s.soaking=false;if(s.manualRequest&&manualTargetReached(i)){finishPlantSession(i,STOP_MANUAL_COMPLETE);return;}
-    if(!s.manualRequest&&s.moisture>=c.targetHigh){finishPlantSession(i,STOP_TARGET_REACHED);return;}
-    if(!s.manualRequest&&s.responseDeadlineMs>0&&millis()>=s.responseDeadlineMs&&s.moisture-s.moistureAtSessionStart<MIN_MOISTURE_GAIN_PERCENT){s.waterResponseFault=true;finishPlantSession(i,STOP_NO_FLOW);return;}
-    if(s.manualRequest&&s.manualRequestedMs>0&&s.sessionPumpMs>=s.manualRequestedMs){finishPlantSession(i,STOP_MANUAL_COMPLETE);return;}
-    startBurst(i);
+  if(s.soaking){if(millis()<s.soakUntilMs)return;s.soaking=false;if(s.manualRequest&&manualTargetReached(i)){finishPlantSession(i,STOP_MANUAL_COMPLETE);return;}if(!s.manualRequest&&s.moisture>=c.targetHigh){finishPlantSession(i,STOP_TARGET_REACHED);return;}if(!s.manualRequest&&s.responseDeadlineMs>0&&millis()>=s.responseDeadlineMs&&s.moisture-s.moistureAtSessionStart<MIN_MOISTURE_GAIN_PERCENT){s.waterResponseFault=true;finishPlantSession(i,STOP_NO_FLOW);return;}if(s.manualRequest&&s.manualRequestedMs>0&&s.sessionPumpMs>=s.manualRequestedMs){finishPlantSession(i,STOP_MANUAL_COMPLETE);return;}startBurst(i);
   }
 }
 int nextAutomaticPlant(){static int last=-1;for(int step=1;step<=NUM_PLANTS;step++){int i=(last+step)%NUM_PLANTS;if(plants[i].mode!=MODE_AUTO)continue;if(states[i].moisture>=plants[i].targetLow)continue;if(!canStartPlant(i,false))continue;last=i;return i;}return-1;}
-void wateringController(){updateTankState();if(otaInProgress){if(activePlant>=0)emergencyHardwareStop(STOP_EMERGENCY);return;}if(emergencyStop){if(activePlant>=0)emergencyHardwareStop(STOP_EMERGENCY);return;}if(activePlant>=0){evaluateActivePlant();return;}
-  for(int i=0;i<NUM_PLANTS;i++)if(states[i].manualRequest&&canStartPlant(i,true)){startPlantSession(i,true);startBurst(i);return;}int n=nextAutomaticPlant();if(n>=0){startPlantSession(n,false);startBurst(n);}
-}
+void wateringController(){updateTankState();if(otaInProgress){if(activePlant>=0)emergencyHardwareStop(STOP_EMERGENCY);return;}if(emergencyStop){if(activePlant>=0)emergencyHardwareStop(STOP_EMERGENCY);return;}if(activePlant>=0){evaluateActivePlant();return;}for(int i=0;i<NUM_PLANTS;i++)if(states[i].manualRequest&&canStartPlant(i,true)){startPlantSession(i,true);startBurst(i);return;}int n=nextAutomaticPlant();if(n>=0){startPlantSession(n,false);startBurst(n);}}
 
-// ========================= REMOTE COMMAND / CONFIG =========================
 bool commandTimestampValid(const String &json){uint64_t issued=(uint64_t)jsonLongValue(json,"issuedAtEpochMs",0);if(!issued)return false;uint64_t now=epochMs();if(!now)return false;return issued<=now+REMOTE_COMMAND_FUTURE_SKEW_MS && now-issued<=REMOTE_COMMAND_MAX_AGE_MS;}
 void applyCalibrationCommand(int i,const String&kind){if(i<0||i>=NUM_PLANTS||states[i].sensorFault)return;if(kind=="dry")plants[i].airRaw=states[i].raw;if(kind=="wet")plants[i].wetRaw=states[i].raw;if(plants[i].airRaw>plants[i].wetRaw+100)savePlantConfig(i);}
-void applyRemotePlantConfig(int i,const String&json){if(i<0||i>=NUM_PLANTS||json=="null"||json.length()<2)return;String name=jsonStringValue(json,"name",plants[i].name);long low=jsonLongValue(json,"targetLow",plants[i].targetLow),high=jsonLongValue(json,"targetHigh",plants[i].targetHigh);long burst=jsonLongValue(json,"burstMs",plants[i].burstMs),bml=jsonLongValue(json,"burstMl",plants[i].burstMl),soak=jsonLongValue(json,"soakSec",plants[i].soakMs/1000UL),interval=jsonLongValue(json,"minIntervalMin",plants[i].minIntervalMs/60000UL);String mode=jsonStringValue(json,"mode",modeText(plants[i].mode));
-  if(name.length()&&name.length()<=24)plants[i].name=name;plants[i].targetLow=constrain(low,0,95);plants[i].targetHigh=constrain(high,plants[i].targetLow+1,100);plants[i].burstMs=constrain((unsigned long)max(500L,burst),500UL,plants[i].maxBurstMs);plants[i].burstMl=constrain((uint32_t)max(10L,bml),(uint32_t)10,(uint32_t)2000);plants[i].soakMs=constrain((unsigned long)max(10L,soak)*1000UL,10000UL,30UL*60UL*1000UL);plants[i].minIntervalMs=constrain((unsigned long)max(1L,interval)*60000UL,60000UL,7UL*24UL*60UL*60UL*1000UL);plants[i].mode=parseMode(mode);savePlantConfig(i);
-}
+void applyRemotePlantConfig(int i,const String&json){if(i<0||i>=NUM_PLANTS||json=="null"||json.length()<2)return;String name=jsonStringValue(json,"name",plants[i].name);long low=jsonLongValue(json,"targetLow",plants[i].targetLow),high=jsonLongValue(json,"targetHigh",plants[i].targetHigh);long burst=jsonLongValue(json,"burstMs",plants[i].burstMs),bml=jsonLongValue(json,"burstMl",plants[i].burstMl),soak=jsonLongValue(json,"soakSec",plants[i].soakMs/1000UL),interval=jsonLongValue(json,"minIntervalMin",plants[i].minIntervalMs/60000UL);String mode=jsonStringValue(json,"mode",modeText(plants[i].mode));if(name.length()&&name.length()<=24)plants[i].name=name;plants[i].targetLow=constrain(low,0,95);plants[i].targetHigh=constrain(high,plants[i].targetLow+1,100);plants[i].burstMs=constrain((unsigned long)max(500L,burst),500UL,plants[i].maxBurstMs);plants[i].burstMl=constrain((uint32_t)max(10L,bml),(uint32_t)10,(uint32_t)2000);plants[i].soakMs=constrain((unsigned long)max(10L,soak)*1000UL,10000UL,30UL*60UL*1000UL);plants[i].minIntervalMs=constrain((unsigned long)max(1L,interval)*60000UL,60000UL,7UL*24UL*60UL*60UL*1000UL);plants[i].mode=parseMode(mode);savePlantConfig(i);}
 void pollRemoteConfig(){String v;if(!httpGet("/config/version",v))return;v.replace("\"","");v.trim();if(!v.length()||v=="null"||v==lastConfigVersion)return;for(int i=0;i<NUM_PLANTS;i++){String b;if(httpGet("/config/plants/"+String(i),b))applyRemotePlantConfig(i,b);}lastConfigVersion=v;prefs.putString("cfgVersion",v);}
 void acknowledgeCommand(const String&id,const String&result){String j="{\"id\":\""+id+"\",\"result\":\""+result+"\",\"handledAtUptimeMs\":"+String(millis())+"}";httpPutJson("/commandAck",j);}
-void handleRemoteCommand(const String&json){if(json=="null"||json.length()<2)return;String id=jsonStringValue(json,"id","");String action=jsonStringValue(json,"action","");if(!id.length()||!action.length()||id==lastCommandId)return;int plant=jsonLongValue(json,"plantIndex",-1);long sec=jsonLongValue(json,"durationSec",0),ml=jsonLongValue(json,"amountMl",0);action.toLowerCase();String result="ignored";
-  if(!commandTimestampValid(json)){lastCommandId=id;prefs.putString("lastCmd",lastCommandId);acknowledgeCommand(id,"expired_or_clock_unavailable");return;}
-  if(action=="emergency_stop"){emergencyStop=true;prefs.putBool("eStop",true);emergencyHardwareStop(STOP_EMERGENCY);result="stopped";}
-  else if(action=="resume"){emergencyStop=false;prefs.putBool("eStop",false);result="resumed";}
-  else if(action=="water_now"&&plant>=0&&plant<NUM_PLANTS){if(!emergencyStop&&!tankEmpty&&plants[plant].mode!=MODE_DISABLED){states[plant].manualRequest=true;states[plant].manualRequestedMl=FLOW_SENSOR_ENABLED?(uint32_t)constrain((long)ml,0L,2000L):0;states[plant].manualRequestedMs=FLOW_SENSOR_ENABLED?0:(unsigned long)constrain(sec,1L,(long)(plants[plant].maxSessionMs/1000UL))*1000UL;if(FLOW_SENSOR_ENABLED&&states[plant].manualRequestedMl==0)states[plant].manualRequestedMl=plants[plant].burstMl;if(!FLOW_SENSOR_ENABLED&&states[plant].manualRequestedMs==0)states[plant].manualRequestedMs=5000;result="queued";}else result="blocked_by_safety";}
-  else if(action=="set_mode"&&plant>=0&&plant<NUM_PLANTS){plants[plant].mode=parseMode(jsonStringValue(json,"mode","AUTO"));savePlantConfig(plant);if(plants[plant].mode==MODE_DISABLED&&activePlant==plant)stopBurst(plant,STOP_MANUAL_COMPLETE,true);result="mode_saved";}
-  else if(action=="calibrate_dry"&&plant>=0&&plant<NUM_PLANTS){applyCalibrationCommand(plant,"dry");result="dry_saved";}
-  else if(action=="calibrate_wet"&&plant>=0&&plant<NUM_PLANTS){applyCalibrationCommand(plant,"wet");result="wet_saved";}
-  else if(action=="clear_fault"&&plant>=0&&plant<NUM_PLANTS){states[plant].noFlowFault=false;states[plant].waterResponseFault=false;result="fault_cleared";}
-  lastCommandId=id;prefs.putString("lastCmd",lastCommandId);acknowledgeCommand(id,result);
-}
+void handleRemoteCommand(const String&json){if(json=="null"||json.length()<2)return;String id=jsonStringValue(json,"id","");String action=jsonStringValue(json,"action","");if(!id.length()||!action.length()||id==lastCommandId)return;int plant=jsonLongValue(json,"plantIndex",-1);long sec=jsonLongValue(json,"durationSec",0),ml=jsonLongValue(json,"amountMl",0);action.toLowerCase();String result="ignored";if(!commandTimestampValid(json)){lastCommandId=id;prefs.putString("lastCmd",lastCommandId);acknowledgeCommand(id,"expired_or_clock_unavailable");return;}if(action=="emergency_stop"){emergencyStop=true;prefs.putBool("eStop",true);emergencyHardwareStop(STOP_EMERGENCY);result="stopped";}else if(action=="resume"){emergencyStop=false;prefs.putBool("eStop",false);result="resumed";}else if(action=="water_now"&&plant>=0&&plant<NUM_PLANTS){if(!emergencyStop&&!tankEmpty&&plants[plant].mode!=MODE_DISABLED){states[plant].manualRequest=true;states[plant].manualRequestedMl=FLOW_SENSOR_ENABLED?(uint32_t)constrain((long)ml,0L,2000L):0;states[plant].manualRequestedMs=FLOW_SENSOR_ENABLED?0:(unsigned long)constrain(sec,1L,(long)(plants[plant].maxSessionMs/1000UL))*1000UL;if(FLOW_SENSOR_ENABLED&&states[plant].manualRequestedMl==0)states[plant].manualRequestedMl=plants[plant].burstMl;if(!FLOW_SENSOR_ENABLED&&states[plant].manualRequestedMs==0)states[plant].manualRequestedMs=5000;result="queued";}else result="blocked_by_safety";}else if(action=="set_mode"&&plant>=0&&plant<NUM_PLANTS){plants[plant].mode=parseMode(jsonStringValue(json,"mode","AUTO"));savePlantConfig(plant);if(plants[plant].mode==MODE_DISABLED&&activePlant==plant)stopBurst(plant,STOP_MANUAL_COMPLETE,true);result="mode_saved";}else if(action=="calibrate_dry"&&plant>=0&&plant<NUM_PLANTS){applyCalibrationCommand(plant,"dry");result="dry_saved";}else if(action=="calibrate_wet"&&plant>=0&&plant<NUM_PLANTS){applyCalibrationCommand(plant,"wet");result="wet_saved";}else if(action=="clear_fault"&&plant>=0&&plant<NUM_PLANTS){states[plant].noFlowFault=false;states[plant].waterResponseFault=false;result="fault_cleared";}lastCommandId=id;prefs.putString("lastCmd",lastCommandId);acknowledgeCommand(id,result);}
 void pollRemoteCommand(){String b;if(httpGet("/command",b))handleRemoteCommand(b);}
 
-// ========================= STATUS / HISTORY =========================
 String buildPlantJson(int i){PlantState&s=states[i];PlantConfig&c=plants[i];String j="{";j+="\"name\":\""+c.name+"\",\"moisture\":"+String(s.moisture)+",\"raw\":"+String(s.raw)+",";j+="\"targetLow\":"+String(c.targetLow)+",\"targetHigh\":"+String(c.targetHigh)+",\"targetRange\":\""+String(c.targetLow)+"-"+String(c.targetHigh)+"%\",";j+="\"mode\":\""+modeText(c.mode)+"\",\"watering\":"+boolJson(s.watering)+",\"soaking\":"+boolJson(s.soaking)+",\"manualQueued\":"+boolJson(s.manualRequest)+",";j+="\"sensorFault\":"+boolJson(s.sensorFault)+",\"noFlowFault\":"+boolJson(s.noFlowFault)+",\"waterResponseFault\":"+boolJson(s.waterResponseFault)+",\"fault\":"+boolJson(s.sensorFault||s.noFlowFault||s.waterResponseFault)+",";j+="\"lastStopReason\":\""+stopReasonText(s.lastStopReason)+"\",\"lastWateredUptimeMs\":"+String(s.lastWateredMs)+",\"lastDeliveredMl\":"+String(s.lastDeliveredMl)+",\"hourlyPumpMs\":"+String(s.hourlyPumpMs)+",\"dailyPumpMs\":"+String(s.dailyPumpMs)+",\"burstMs\":"+String(c.burstMs)+",\"burstMl\":"+String(c.burstMl)+",\"soakSec\":"+String(c.soakMs/1000UL)+",\"minIntervalMin\":"+String(c.minIntervalMs/60000UL)+"}";return j;}
 String buildStatusJson(){String j="{";j+="\"firmware\":\""+String(FIRMWARE_VERSION)+"\",\"ota\":true,\"otaPort\":80,\"otaUser\":\""+String(OTA_USER)+"\",\"totalPlants\":"+String(NUM_PLANTS)+",\"systemReady\":"+boolJson(systemReady)+",\"wateringAllowed\":"+boolJson(bootAllowsWatering()&&!emergencyStop&&!tankEmpty)+",\"emergencyStop\":"+boolJson(emergencyStop)+",\"tankSensorEnabled\":"+boolJson(TANK_SENSOR_ENABLED)+",\"tankEmpty\":"+boolJson(tankEmpty)+",\"flowSensorEnabled\":"+boolJson(FLOW_SENSOR_ENABLED)+",\"flowPulses\":"+String(flowPulseCount)+",\"activePlantIndex\":"+String(activePlant)+",\"ip\":\""+deviceIp+"\",\"wifiRssi\":"+String(wifiConnected?WiFi.RSSI():0)+",\"uptimeMin\":"+String(millis()/60000UL)+",\"updatedAtMs\":"+String(millis())+",\"resetReason\":\""+resetReasonText()+"\",\"timeSynced\":"+boolJson(timeSynced)+",\"plants\":[";for(int i=0;i<NUM_PLANTS;i++){if(i)j+=",";j+=buildPlantJson(i);}j+="]}";return j;}
 void publishStatus(){httpPutJson("/status",buildStatusJson());}
 void publishTelemetryHistory(){String j="{\"uptimeMs\":"+String(millis())+",\"epochMs\":"+String((unsigned long long)epochMs())+",\"tankEmpty\":"+boolJson(tankEmpty)+",\"emergencyStop\":"+boolJson(emergencyStop)+",\"plants\":[";for(int i=0;i<NUM_PLANTS;i++){if(i)j+=",";j+="{\"name\":\""+plants[i].name+"\",\"moisture\":"+String(states[i].moisture)+",\"raw\":"+String(states[i].raw)+"}";}j+="]}";httpPostJson("/history/telemetry",j);}
 
 // ========================= LOCAL OTA =========================
-void otaSafeStart(){otaInProgress=true;systemReady=false;emergencyHardwareStop(STOP_EMERGENCY);digitalWrite(PUMP_PIN,RELAY_OFF);closeAllValves();otaStartedMs=millis();}
-void handleUpdatePage(){if(!server.authenticate(OTA_USER,OTA_PASSWORD)){return server.requestAuthentication();}String h="<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>Plant V2 OTA</title></head><body><h2>Plant Watering V2 OTA</h2><p>Current firmware: "+String(FIRMWARE_VERSION)+"</p><form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='firmware' accept='.bin' required><button type='submit'>Upload firmware</button></form><p>All pump/valves are forced OFF during update.</p></body></html>";server.send(200,"text/html",h);}
-void handleUpdateUpload(){if(!server.authenticate(OTA_USER,OTA_PASSWORD))return;HTTPUpload&u=server.upload();if(u.status==UPLOAD_FILE_START){otaSafeStart();if(!Update.begin(UPDATE_SIZE_UNKNOWN)){Update.printError(Serial);}}else if(u.status==UPLOAD_FILE_WRITE){if(!Update.hasError())Update.write(u.buf,u.currentSize);}else if(u.status==UPLOAD_FILE_END){if(Update.end(true)){server.send(200,"text/plain","Update successful. Device rebooting...");delay(500);ESP.restart();}else{Update.printError(Serial);otaInProgress=false;server.send(500,"text/plain","Update failed");}}}
+// The upload callback only receives/writes multipart chunks. The POST handler
+// sends the final HTTP response after the upload callback has completed.
+bool otaUploadSuccess = false;
+bool otaUploadFailed = false;
+size_t otaUploadBytes = 0;
+size_t otaUploadTotal = 0;
+
+void otaSafeStart(){
+  otaInProgress=true;systemReady=false;emergencyHardwareStop(STOP_EMERGENCY);
+  digitalWrite(PUMP_PIN,RELAY_OFF);closeAllValves();otaStartedMs=millis();
+}
+
+void handleUpdatePage(){
+  if(!server.authenticate(OTA_USER,OTA_PASSWORD)){server.requestAuthentication();return;}
+  String h="<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+           "<title>Plant V2 OTA</title><style>body{font-family:Arial,sans-serif;max-width:600px;margin:40px auto;padding:0 16px}"
+           "progress{width:100%;height:28px}button{padding:10px 18px;margin-top:12px}#status{margin-top:14px;font-weight:bold}.ok{color:green}.err{color:#b00020}</style></head><body>"
+           "<h2>Plant Watering V2 OTA</h2><p>Current firmware: "+String(FIRMWARE_VERSION)+"</p>"
+           "<form id='otaForm' method='POST' action='/update' enctype='multipart/form-data'>"
+           "<input id='firmware' type='file' name='firmware' accept='.bin' required><br>"
+           "<button id='uploadBtn' type='submit'>Upload firmware</button></form>"
+           "<progress id='progress' value='0' max='100' style='display:none'></progress>"
+           "<div id='status'>All pump/valves are forced OFF during update.</div>"
+           "<script>const f=document.getElementById('otaForm'),i=document.getElementById('firmware'),p=document.getElementById('progress'),s=document.getElementById('status'),b=document.getElementById('uploadBtn');"
+           "f.addEventListener('submit',function(e){e.preventDefault();if(!i.files.length)return;"
+           "b.disabled=true;p.style.display='block';p.value=0;s.className='';s.textContent='Uploading: 0%';"
+           "const x=new XMLHttpRequest();x.open('POST','/update',true);"
+           "x.upload.onprogress=function(e){if(e.lengthComputable){const n=Math.round(e.loaded*100/e.total);p.value=n;s.textContent='Uploading: '+n+'%';}};"
+           "x.onload=function(){if(x.status>=200&&x.status<300){p.value=100;s.className='ok';s.innerHTML=x.responseText;}else{s.className='err';s.textContent='Update failed: HTTP '+x.status+' '+x.responseText;b.disabled=false;}};"
+           "x.onerror=function(){s.className='err';s.textContent='Upload failed: connection lost before the ESP32 confirmed the update.';b.disabled=false;};"
+           "x.ontimeout=function(){s.className='err';s.textContent='Upload timed out. Check the ESP32 Serial Monitor before retrying.';b.disabled=false;};"
+           "x.timeout=600000;x.send(new FormData(f));});</script></body></html>";
+  server.send(200,"text/html",h);
+}
+
+void handleUpdateUpload(){
+  if(!server.authenticate(OTA_USER,OTA_PASSWORD))return;
+  HTTPUpload&u=server.upload();
+  if(u.status==UPLOAD_FILE_START){
+    otaUploadSuccess=false;otaUploadFailed=false;otaUploadBytes=0;otaUploadTotal=0;
+    otaSafeStart();otaUploadTotal=u.totalSize;
+    Serial.print("Web OTA upload started: ");Serial.println(u.filename);
+    if(!Update.begin(UPDATE_SIZE_UNKNOWN)){Update.printError(Serial);otaUploadFailed=true;}
+  }else if(u.status==UPLOAD_FILE_WRITE){
+    otaUploadBytes+=u.currentSize;
+    if(!otaUploadFailed&&!Update.hasError()){
+      size_t written=Update.write(u.buf,u.currentSize);
+      if(written!=u.currentSize){Update.printError(Serial);otaUploadFailed=true;}
+    }
+    if(otaUploadTotal>0)Serial.printf("Web OTA: %u%%\n",(unsigned)((otaUploadBytes*100UL)/otaUploadTotal));
+    else Serial.printf("Web OTA: %u bytes\n",(unsigned)otaUploadBytes);
+  }else if(u.status==UPLOAD_FILE_END){
+    if(!otaUploadFailed&&Update.end(true)){
+      otaUploadSuccess=true;
+      Serial.printf("Web OTA upload complete: %u bytes\n",(unsigned)otaUploadBytes);
+    }else{
+      Update.printError(Serial);otaUploadFailed=true;otaUploadSuccess=false;
+      otaInProgress=false;systemReady=true;bootMs=millis();forceAllOutputsOff();
+      Serial.println("Web OTA update failed; running firmware was not replaced.");
+    }
+  }
+}
+
+void handleUpdateComplete(){
+  if(!server.authenticate(OTA_USER,OTA_PASSWORD)){server.requestAuthentication();return;}
+  if(otaUploadSuccess){
+    server.send(200,"text/html","<!doctype html><html><body><h2>OTA update successful</h2><p>The firmware was written successfully.</p><p>The ESP32 will reboot now.</p></body></html>");
+    delay(1000);ESP.restart();return;
+  }
+  if(otaUploadFailed){
+    server.send(500,"text/html","<!doctype html><html><body><h2>OTA update failed</h2><p>The firmware update was not completed. The existing firmware remains installed.</p><p>Check the ESP32 Serial Monitor for the Update error and retry with a valid .bin file.</p></body></html>");
+    return;
+  }
+  server.send(400,"text/plain","No firmware upload was received.");
+}
+
 void setupLocalOta(){
   ArduinoOTA.setHostname("plant-watering-v2");ArduinoOTA.setPassword(OTA_PASSWORD);
   ArduinoOTA.onStart([](){otaSafeStart();Serial.println("OTA start: outputs OFF");});
   ArduinoOTA.onEnd([](){Serial.println("OTA complete; rebooting");});
   ArduinoOTA.onProgress([](unsigned int p,unsigned int t){Serial.printf("OTA %u%%\r",(p*100)/t);});
-  ArduinoOTA.onError([](ota_error_t e){Serial.printf("OTA error %u; outputs remain OFF\n",e);otaInProgress=false;});ArduinoOTA.begin();
-  server.on("/update",HTTP_GET,handleUpdatePage);server.on("/update",HTTP_POST,[](){if(!server.authenticate(OTA_USER,OTA_PASSWORD))return server.requestAuthentication();},handleUpdateUpload);
-  server.on("/",HTTP_GET,[](){if(!server.authenticate(OTA_USER,OTA_PASSWORD))return server.requestAuthentication();server.send(200,"text/plain","Plant Watering V2 local OTA. Open /update to upload a .bin firmware.");});server.begin();
+  ArduinoOTA.onError([](ota_error_t e){Serial.printf("OTA error %u; outputs remain OFF\n",e);otaInProgress=false;systemReady=true;forceAllOutputsOff();});ArduinoOTA.begin();
+  server.on("/update",HTTP_GET,handleUpdatePage);
+  server.on("/update",HTTP_POST,handleUpdateComplete,handleUpdateUpload);
+  server.on("/",HTTP_GET,[](){if(!server.authenticate(OTA_USER,OTA_PASSWORD)){server.requestAuthentication();return;}server.send(200,"text/plain","Plant Watering V2 local OTA. Open /update to upload a .bin firmware.");});
+  server.begin();
 }
 
-// ========================= LCD / WIFI / TIME =========================
 void lcdLine(uint8_t row,String t){while(t.length()<LCD_COLS)t+=" ";if(t.length()>LCD_COLS)t=t.substring(0,LCD_COLS);lcd.setCursor(0,row);lcd.print(t);}
 void refreshLcd(){if(millis()-lastLcdMs<LCD_UPDATE_MS)return;lastLcdMs=millis();if(!systemReady){lcdLine(0,"Plant Care V2");lcdLine(1,"Starting safely");return;}if(emergencyStop){lcdLine(0,"EMERGENCY STOP");lcdLine(1,"Pump disabled");return;}if(tankEmpty){lcdLine(0,"TANK EMPTY");lcdLine(1,"Pump disabled");return;}if(!bootAllowsWatering()){lcdLine(0,"Safety startup");lcdLine(1,"Checking sensors");return;}if(millis()-lastRotateMs>=LCD_ROTATE_MS){lastRotateMs=millis();displayPlant=(displayPlant+1)%NUM_PLANTS;}int i=activePlant>=0?activePlant:displayPlant;lcdLine(0,plants[i].name+":"+String(states[i].moisture)+"%");String l2=states[i].watering?"Watering "+modeText(plants[i].mode):states[i].soaking?"Soaking...":states[i].sensorFault?"Sensor fault":modeText(plants[i].mode)+" / "+String(plants[i].targetLow)+"-"+String(plants[i].targetHigh);lcdLine(1,l2);}
 void beginWifi(){WiFi.persistent(false);WiFi.mode(WIFI_STA);WiFi.setAutoReconnect(true);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);lastWifiRetryMs=millis();}
 void maintainWifi(){bool c=WiFi.status()==WL_CONNECTED;if(c){if(!wifiConnected){wifiConnected=true;deviceIp=WiFi.localIP().toString();Serial.print("WiFi connected: ");Serial.println(deviceIp);configTime(0,0,"pool.ntp.org","time.nist.gov");}return;}wifiConnected=false;deviceIp="offline";if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){lastWifiRetryMs=millis();WiFi.disconnect();beginWifi();}}
 void updateClock(){if(timeSynced)return;time_t now=time(nullptr);if(now>=1700000000){timeSynced=true;Serial.println("NTP time synchronized");for(int i=0;i<NUM_PLANTS;i++)loadRuntimeLimits(i);}}
 
-// ========================= SETUP / LOOP =========================
 void setup(){
   forceAllOutputsOff();Serial.begin(115200);delay(100);Serial.println();Serial.println("========================================");Serial.println(FIRMWARE_VERSION);Serial.print("Reset reason: ");Serial.println(resetReasonText());Serial.println("Pump and valves forced OFF.");Serial.println("========================================");
   delay(POWER_STABILIZE_MS);bootMs=millis();prefs.begin("plantV2",false);emergencyStop=prefs.getBool("eStop",false);lastCommandId=prefs.getString("lastCmd","");lastConfigVersion=prefs.getString("cfgVersion","");
