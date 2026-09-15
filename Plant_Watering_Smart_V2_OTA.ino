@@ -45,6 +45,77 @@ static const char *OTA_PASSWORD = "";
 static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.0";
 static const char *OTA_USER = "admin";
 
+// ========================= WEATHER / CONNECTIVITY =========================
+// Bengaluru weather is an additional AUTO-watering signal. Soil moisture and
+// all existing safety limits remain authoritative.
+static const char *WEATHER_API_URL = "https://api.open-meteo.com/v1/forecast?latitude=12.9716&longitude=77.5946&hourly=precipitation_probability,precipitation&forecast_days=2&timezone=Asia%2FKolkata";
+static const unsigned long WEATHER_REFRESH_MS = 30UL*60UL*1000UL;
+static const int WEATHER_RAIN_PROBABILITY_THRESHOLD = 60;
+static const float WEATHER_RAIN_MM_THRESHOLD = 1.0f;
+static const int WEATHER_LOOKAHEAD_HOURS = 6;
+static const int CONNECTIVITY_HISTORY_MAX = 20;
+bool weatherValid=false, weatherDelayAuto=false;
+int weatherRainProbability=0;
+float weatherRainMm6h=0.0f;
+unsigned long lastWeatherMs=0, weatherUpdatedMs=0;
+
+String weatherArrayNumber(const String &json,const String &key,int index){
+  String token="\""+key+"\""; int p=json.indexOf(token); if(p<0)return "-1";
+  p=json.indexOf('[',p+token.length()); if(p<0)return "-1";
+  int n=0,start=-1; bool inNumber=false;
+  for(int i=p+1;i<(int)json.length();i++){
+    char c=json[i]; if(c==']')break;
+    bool numeric=(c>='0'&&c<='9')||c=='-'||c=='+'||c=='.'||c=='e'||c=='E';
+    if(numeric&&!inNumber){inNumber=true;start=i;}
+    if(!numeric&&inNumber){if(n==index)return json.substring(start,i);n++;inNumber=false;start=-1;}
+  }
+  if(inNumber&&n==index)return json.substring(start); return "-1";
+}
+void refreshWeather(){
+  if(!wifiConnected||!timeSynced||otaInProgress)return;
+  if(lastWeatherMs&&millis()-lastWeatherMs<WEATHER_REFRESH_MS)return;
+  lastWeatherMs=millis(); secureClient.setInsecure(); HTTPClient http;
+  if(!http.begin(secureClient,WEATHER_API_URL)){weatherValid=false;return;}
+  http.setTimeout(5000); int code=http.GET();
+  if(code<200||code>=300){http.end();weatherValid=false;return;}
+  String body=http.getString(); http.end();
+  time_t now=time(nullptr); if(now<1700000000){weatherValid=false;return;}
+  struct tm utcNow; gmtime_r(&now,&utcNow); int hour=(utcNow.tm_hour+5)%24;
+  if(utcNow.tm_min>=30)hour=(hour+1)%24;
+  int maxProbability=0; float rainMm=0; bool parsed=false;
+  for(int off=0;off<WEATHER_LOOKAHEAD_HOURS;off++){
+    String p=weatherArrayNumber(body,"precipitation_probability",hour+off);
+    String mm=weatherArrayNumber(body,"precipitation",hour+off);
+    if(p=="-1"||mm=="-1")continue;
+    maxProbability=max(maxProbability,p.toInt()); float m=mm.toFloat(); if(m>0)rainMm+=m; parsed=true;
+  }
+  if(!parsed){weatherValid=false;return;}
+  weatherRainProbability=constrain(maxProbability,0,100); weatherRainMm6h=rainMm;
+  weatherDelayAuto=weatherRainProbability>=WEATHER_RAIN_PROBABILITY_THRESHOLD&&weatherRainMm6h>=WEATHER_RAIN_MM_THRESHOLD;
+  weatherValid=true; weatherUpdatedMs=millis();
+  Serial.printf("Bengaluru weather: rain=%d%%, next %dh=%.1fmm, delay=%s\n",weatherRainProbability,WEATHER_LOOKAHEAD_HOURS,weatherRainMm6h,weatherDelayAuto?"YES":"NO");
+}
+bool weatherAllowsAutomaticWatering(){return !weatherValid||!weatherDelayAuto;}
+String connectivityKey(int slot){return "conn"+String(slot);}
+void saveConnectivityEventLocal(const String &type,const String &reason){
+  int head=prefs.getInt("connHead",0),count=prefs.getInt("connCount",0); uint64_t now=epochMs();
+  String j="{\"type\":\""+type+"\",\"reason\":\""+reason+"\",\"epochMs\":"+String((unsigned long long)now)+",\"uptimeMs\":"+String(millis())+"}";
+  prefs.putString(connectivityKey(head).c_str(),j); head=(head+1)%CONNECTIVITY_HISTORY_MAX; if(count<CONNECTIVITY_HISTORY_MAX)count++;
+  prefs.putInt("connHead",head);prefs.putInt("connCount",count);
+}
+void publishConnectivityEvent(const String &j){httpPostJson("/history/connectivity",j);}
+void flushConnectivityHistory(){
+  if(!wifiConnected||otaInProgress)return; int head=prefs.getInt("connHead",0),count=prefs.getInt("connCount",0); if(count<=0)return;
+  int oldest=(head-count+CONNECTIVITY_HISTORY_MAX)%CONNECTIVITY_HISTORY_MAX;
+  for(int n=0;n<count;n++){int slot=(oldest+n)%CONNECTIVITY_HISTORY_MAX;String e=prefs.getString(connectivityKey(slot).c_str(),"");if(e.length()){publishConnectivityEvent(e);prefs.remove(connectivityKey(slot).c_str());}}
+  prefs.putInt("connHead",0);prefs.putInt("connCount",0);
+}
+void recordConnectivityEvent(const String &type,const String &reason){
+  String j="{\"type\":\""+type+"\",\"reason\":\""+reason+"\",\"epochMs\":"+String((unsigned long long)epochMs())+",\"uptimeMs\":"+String(millis())+"}";
+  if(wifiConnected)publishConnectivityEvent(j);else saveConnectivityEventLocal(type,reason);
+}
+
+
 // ========================= HARDWARE =========================
 static const int NUM_PLANTS = 5;
 static const int SENSOR_PINS[NUM_PLANTS] = {34, 35, 32, 33, 39};
@@ -309,7 +380,7 @@ uint32_t currentSessionMl(int i){return FLOW_SENSOR_ENABLED?pulsesToMl(flowPulse
 bool bootAllowsWatering(){return systemReady&&hardwareSafe&&!otaInProgress&&millis()-bootMs>=BOOT_WATERING_GRACE_MS&&allPlantsBootValidated();}
 bool canStartPlant(int i,bool manual){
   PlantState&s=states[i];PlantConfig&c=plants[i];refreshTimeWindows(i);
-  if(!bootAllowsWatering()||emergencyStop||tankEmpty||s.sensorFault||s.noFlowFault||s.waterResponseFault)return false;
+  if(!bootAllowsWatering()||emergencyStop||tankEmpty||s.sensorFault||s.noFlowFault||s.waterResponseFault)return false;if(!manual&&!weatherAllowsAutomaticWatering())return false;
   if(c.mode==MODE_DISABLED||(!manual&&c.mode!=MODE_AUTO))return false;
   if(!manual&&s.lastWateredMs>0&&millis()-s.lastWateredMs<c.minIntervalMs)return false;
   if(s.hourlyPumpMs>=c.maxHourlyMs||s.dailyPumpMs>=c.maxDailyMs)return false; return true;
@@ -451,7 +522,7 @@ void setupLocalOta(){
 void lcdLine(uint8_t row,String t){while(t.length()<LCD_COLS)t+=" ";if(t.length()>LCD_COLS)t=t.substring(0,LCD_COLS);lcd.setCursor(0,row);lcd.print(t);}
 void refreshLcd(){if(millis()-lastLcdMs<LCD_UPDATE_MS)return;lastLcdMs=millis();if(!systemReady){lcdLine(0,"Plant Care V2");lcdLine(1,"Starting safely");return;}if(emergencyStop){lcdLine(0,"EMERGENCY STOP");lcdLine(1,"Pump disabled");return;}if(tankEmpty){lcdLine(0,"TANK EMPTY");lcdLine(1,"Pump disabled");return;}if(!bootAllowsWatering()){lcdLine(0,"Safety startup");lcdLine(1,"Checking sensors");return;}if(millis()-lastRotateMs>=LCD_ROTATE_MS){lastRotateMs=millis();displayPlant=(displayPlant+1)%NUM_PLANTS;}int i=activePlant>=0?activePlant:displayPlant;lcdLine(0,plants[i].name+":"+String(states[i].moisture)+"%");String l2=states[i].watering?"Watering "+modeText(plants[i].mode):states[i].soaking?"Soaking...":states[i].sensorFault?"Sensor fault":modeText(plants[i].mode)+" / "+String(plants[i].targetLow)+"-"+String(plants[i].targetHigh);lcdLine(1,l2);}
 void beginWifi(){WiFi.persistent(false);WiFi.mode(WIFI_STA);WiFi.setAutoReconnect(true);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);lastWifiRetryMs=millis();}
-void maintainWifi(){bool c=WiFi.status()==WL_CONNECTED;if(c){if(!wifiConnected){wifiConnected=true;deviceIp=WiFi.localIP().toString();Serial.print("WiFi connected: ");Serial.println(deviceIp);configTime(0,0,"pool.ntp.org","time.nist.gov");}return;}wifiConnected=false;deviceIp="offline";if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){lastWifiRetryMs=millis();WiFi.disconnect();beginWifi();}}
+void maintainWifi(){bool c=WiFi.status()==WL_CONNECTED;if(c){if(!wifiConnected){wifiConnected=true;deviceIp=WiFi.localIP().toString();prefs.putBool("wifiWasConnected",true);Serial.print("WiFi connected: ");Serial.println(deviceIp);configTime(0,0,"pool.ntp.org","time.nist.gov");recordConnectivityEvent("WIFI_CONNECTED",deviceIp);flushConnectivityHistory();}return;}if(wifiConnected){saveConnectivityEventLocal("WIFI_DISCONNECTED","WiFi connection lost");wifiConnected=false;deviceIp="offline";}else deviceIp="offline";if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){lastWifiRetryMs=millis();WiFi.disconnect();beginWifi();}}
 void updateClock(){if(timeSynced)return;time_t now=time(nullptr);if(now>=1700000000){timeSynced=true;Serial.println("NTP time synchronized");for(int i=0;i<NUM_PLANTS;i++)loadRuntimeLimits(i);}}
 
 void setup(){
@@ -466,6 +537,8 @@ void setup(){
   Serial.println("System initialized. Automatic watering blocked during boot grace period.");
 }
 void loop(){
+  refreshWeather();
+  flushConnectivityHistory();
   if(otaInProgress){server.handleClient();ArduinoOTA.handle();digitalWrite(PUMP_PIN,RELAY_OFF);closeAllValves();delay(10);return;}
   maintainWifi();updateClock();server.handleClient();ArduinoOTA.handle();updateTankState();
   if(millis()-lastSensorMs>=SENSOR_SAMPLE_MS){lastSensorMs=millis();for(int i=0;i<NUM_PLANTS;i++)updatePlantSensor(i);}
