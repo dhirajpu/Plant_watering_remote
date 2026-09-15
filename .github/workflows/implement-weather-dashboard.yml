@@ -1,0 +1,244 @@
+name: Implement weather and dashboard enhancements
+on:
+  push:
+    paths:
+      - '.github/weather-dashboard-enhancement-trigger'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch firmware and dashboard
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          fw = Path('Plant_Watering_Smart_V2_OTA.ino')
+          s = fw.read_text()
+
+          marker = 'static const char *OTA_USER = "admin";'
+          add = '''
+
+// ========================= WEATHER / CONNECTIVITY =========================
+// Bengaluru weather is used only as an additional AUTO-watering signal.
+// Soil moisture and all existing safety limits remain authoritative.
+static const char *WEATHER_API_URL = "https://api.open-meteo.com/v1/forecast?latitude=12.9716&longitude=77.5946&hourly=precipitation_probability,precipitation&forecast_days=1&timezone=Asia%2FKolkata";
+static const unsigned long WEATHER_REFRESH_MS = 30UL * 60UL * 1000UL;
+static const int WEATHER_RAIN_PROBABILITY_THRESHOLD = 60;
+static const float WEATHER_RAIN_MM_THRESHOLD = 1.0f;
+static const int WEATHER_LOOKAHEAD_HOURS = 6;
+static const int CONNECTIVITY_HISTORY_MAX = 20;
+
+bool weatherValid = false;
+bool weatherDelayAuto = false;
+int weatherRainProbability = 0;
+float weatherRainMm6h = 0.0f;
+unsigned long lastWeatherMs = 0;
+unsigned long weatherUpdatedMs = 0;
+
+String extractArrayNumber(const String &json, const String &key, int index, const String &fallback = "0") {
+  String token = "\\\"" + key + "\\\"";
+  int p = json.indexOf(token);
+  if (p < 0) return fallback;
+  p = json.indexOf('[', p + token.length());
+  if (p < 0) return fallback;
+  int current = 0;
+  bool inNumber = false;
+  int start = -1;
+  for (int i = p + 1; i < (int)json.length(); i++) {
+    char c = json[i];
+    if (c == ']') break;
+    bool numeric = (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E';
+    if (numeric && !inNumber) { inNumber = true; start = i; }
+    if ((!numeric || c == ',') && inNumber) {
+      if (current == index) return json.substring(start, i);
+      current++;
+      inNumber = false;
+      start = -1;
+    }
+  }
+  if (inNumber && current == index) return json.substring(start);
+  return fallback;
+}
+
+int localHour() {
+  time_t now = time(nullptr);
+  if (now < 1700000000) return 0;
+  struct tm t;
+  localtime_r(&now, &t);
+  return t.tm_hour;
+}
+
+void refreshWeather() {
+  if (!wifiConnected || !timeSynced || otaInProgress) return;
+  if (lastWeatherMs && millis() - lastWeatherMs < WEATHER_REFRESH_MS) return;
+  lastWeatherMs = millis();
+  secureClient.setInsecure();
+  HTTPClient http;
+  if (!http.begin(secureClient, WEATHER_API_URL)) { weatherValid = false; return; }
+  http.setTimeout(5000);
+  int code = http.GET();
+  if (code < 200 || code >= 300) { http.end(); weatherValid = false; return; }
+  String body = http.getString();
+  http.end();
+
+  int hour = localHour();
+  int maxProbability = 0;
+  float rainMm = 0.0f;
+  bool parsed = false;
+  for (int offset = 0; offset < WEATHER_LOOKAHEAD_HOURS; offset++) {
+    int idx = hour + offset;
+    String prob = extractArrayNumber(body, "precipitation_probability", idx, "-1");
+    String mm = extractArrayNumber(body, "precipitation", idx, "-1");
+    if (prob == "-1" || mm == "-1") continue;
+    int p = prob.toInt();
+    float m = mm.toFloat();
+    if (p > maxProbability) maxProbability = p;
+    if (m > 0) rainMm += m;
+    parsed = true;
+  }
+  if (!parsed) { weatherValid = false; return; }
+  weatherRainProbability = constrain(maxProbability, 0, 100);
+  weatherRainMm6h = rainMm;
+  weatherDelayAuto = weatherRainProbability >= WEATHER_RAIN_PROBABILITY_THRESHOLD && weatherRainMm6h >= WEATHER_RAIN_MM_THRESHOLD;
+  weatherValid = true;
+  weatherUpdatedMs = millis();
+  Serial.printf("Bengaluru weather: rain probability=%d%%, next %dh precipitation=%.1fmm, auto delay=%s\\n", weatherRainProbability, WEATHER_LOOKAHEAD_HOURS, weatherRainMm6h, weatherDelayAuto ? "YES" : "NO");
+}
+
+bool weatherAllowsAutomaticWatering() {
+  if (!weatherValid) return true; // Weather API failure never blocks sensor-only AUTO mode.
+  return !weatherDelayAuto;
+}
+
+String connectivityKey(int slot) { return "conn" + String(slot); }
+void saveConnectivityEventLocal(const String &type, const String &reason) {
+  int head = prefs.getInt("connHead", 0);
+  int count = prefs.getInt("connCount", 0);
+  uint64_t now = epochMs();
+  String j = "{\\\"type\\\":\\\"" + type + "\\\",\\\"reason\\\":\\\"" + reason + "\\\",\\\"epochMs\\\":" + String((unsigned long long)now) + ",\\\"uptimeMs\\\":" + String(millis()) + "}";
+  prefs.putString(connectivityKey(head).c_str(), j);
+  head = (head + 1) % CONNECTIVITY_HISTORY_MAX;
+  if (count < CONNECTIVITY_HISTORY_MAX) count++;
+  prefs.putInt("connHead", head);
+  prefs.putInt("connCount", count);
+}
+void publishConnectivityEvent(const String &eventJson) { httpPostJson("/history/connectivity", eventJson); }
+void flushConnectivityHistory() {
+  if (!wifiConnected || otaInProgress) return;
+  int head = prefs.getInt("connHead", 0);
+  int count = prefs.getInt("connCount", 0);
+  if (count <= 0) return;
+  int oldest = (head - count + CONNECTIVITY_HISTORY_MAX) % CONNECTIVITY_HISTORY_MAX;
+  for (int n = 0; n < count; n++) {
+    int slot = (oldest + n) % CONNECTIVITY_HISTORY_MAX;
+    String event = prefs.getString(connectivityKey(slot).c_str(), "");
+    if (!event.length()) continue;
+    publishConnectivityEvent(event);
+    prefs.remove(connectivityKey(slot).c_str());
+  }
+  prefs.putInt("connHead", 0);
+  prefs.putInt("connCount", 0);
+}
+void recordConnectivityEvent(const String &type, const String &reason) {
+  String j = "{\\\"type\\\":\\\"" + type + "\\\",\\\"reason\\\":\\\"" + reason + "\\\",\\\"epochMs\\\":" + String((unsigned long long)epochMs()) + ",\\\"uptimeMs\\\":" + String(millis()) + "}";
+  if (wifiConnected) publishConnectivityEvent(j);
+  else saveConnectivityEventLocal(type, reason);
+}
+'''
+          if marker not in s: raise SystemExit('weather insertion marker missing')
+          s = s.replace(marker, marker + add, 1)
+
+          old = 'if(!bootAllowsWatering()||emergencyStop||tankEmpty||s.sensorFault||s.noFlowFault||s.waterResponseFault)return false;'
+          new = 'if(!bootAllowsWatering()||emergencyStop||tankEmpty||s.sensorFault||s.noFlowFault||s.waterResponseFault)return false;if(!manual&&!weatherAllowsAutomaticWatering())return false;'
+          if old not in s: raise SystemExit('canStartPlant marker missing')
+          s = s.replace(old, new, 1)
+
+          old = 'void maintainWifi(){bool c=WiFi.status()==WL_CONNECTED;if(c){if(!wifiConnected){wifiConnected=true;deviceIp=WiFi.localIP().toString();Serial.print("WiFi connected: ");Serial.println(deviceIp);configTime(0,0,"pool.ntp.org","time.nist.gov");}return;}wifiConnected=false;deviceIp="offline";if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){lastWifiRetryMs=millis();WiFi.disconnect();beginWifi();}}'
+          new = '''void maintainWifi(){
+            bool c=WiFi.status()==WL_CONNECTED;
+            if(c){
+              if(!wifiConnected){wifiConnected=true;deviceIp=WiFi.localIP().toString();Serial.print("WiFi connected: ");Serial.println(deviceIp);configTime(0,0,"pool.ntp.org","time.nist.gov");recordConnectivityEvent("WIFI_CONNECTED",deviceIp);flushConnectivityHistory();}
+              return;
+            }
+            if(wifiConnected){wifiConnected=false;deviceIp="offline";recordConnectivityEvent("WIFI_DISCONNECTED","WiFi connection lost");}
+            else {deviceIp="offline";}
+            if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){lastWifiRetryMs=millis();WiFi.disconnect();beginWifi();}
+          }'''
+          if old not in s: raise SystemExit('maintainWifi marker missing')
+          s = s.replace(old, new, 1)
+
+          old = 'if(millis()-lastStatusMs>=REMOTE_STATUS_MS){lastStatusMs=millis();publishStatus();}if(wifiConnected&&millis()-lastTelemetryHistoryMs>=TELEMETRY_HISTORY_MS)'
+          new = 'if(millis()-lastStatusMs>=REMOTE_STATUS_MS){lastStatusMs=millis();publishStatus();}if(wifiConnected){refreshWeather();flushConnectivityHistory();}if(wifiConnected&&millis()-lastTelemetryHistoryMs>=TELEMETRY_HISTORY_MS)'
+          if old not in s: raise SystemExit('loop status marker missing')
+          s = s.replace(old, new, 1)
+
+          old = 'j+="\\\"wifiRssi\\\":"+String(wifiConnected?WiFi.RSSI():0)+",\\\"uptimeMin\\\":"'
+          new = 'j+="\\\"wifiRssi\\\":"+String(wifiConnected?WiFi.RSSI():0)+",\\\"weatherValid\\\":"+boolJson(weatherValid)+",\\\"weatherRainProbability\\\":"+String(weatherRainProbability)+",\\\"weatherRainMm6h\\\":"+String(weatherRainMm6h,1)+",\\\"weatherDelayAuto\\\":"+boolJson(weatherDelayAuto)+",\\\"uptimeMin\\\":"'
+          if old not in s: raise SystemExit('status weather marker missing')
+          s = s.replace(old, new, 1)
+
+          old = 'prefs.begin("plantV2",false);emergencyStop=prefs.getBool("eStop",false);lastCommandId='
+          new = 'prefs.begin("plantV2",false);if(prefs.getBool("wifiWasConnected",false))saveConnectivityEventLocal("DEVICE_RESTART","Previous session ended without a clean Wi-Fi disconnect");prefs.putBool("wifiWasConnected",false);emergencyStop=prefs.getBool("eStop",false);lastCommandId='
+          if old not in s: raise SystemExit('setup connectivity marker missing')
+          s = s.replace(old, new, 1)
+
+          old = 'if(!wifiConnected){wifiConnected=true;deviceIp=WiFi.localIP().toString();Serial.print("WiFi connected: ");Serial.println(deviceIp);configTime(0,0,"pool.ntp.org","time.nist.gov");recordConnectivityEvent("WIFI_CONNECTED",deviceIp);flushConnectivityHistory();}'
+          new = 'if(!wifiConnected){wifiConnected=true;deviceIp=WiFi.localIP().toString();prefs.putBool("wifiWasConnected",true);Serial.print("WiFi connected: ");Serial.println(deviceIp);configTime(0,0,"pool.ntp.org","time.nist.gov");recordConnectivityEvent("WIFI_CONNECTED",deviceIp);flushConnectivityHistory();}'
+          if old not in s: raise SystemExit('wifi connected persistence marker missing')
+          s = s.replace(old, new, 1)
+
+          fw.write_text(s)
+
+          # Dashboard HTML: favicon + weather summary + connectivity history.
+          p = Path('v2/index.html'); h = p.read_text()
+          h = h.replace('<link rel="stylesheet" href="./styles.css">', '<link rel="icon" type="image/svg+xml" href="./plant-icon.svg">\n  <link rel="stylesheet" href="./styles.css">')
+          h = h.replace('<article class="summary-card"><span>Tank</span>', '<article class="summary-card"><span>🌦️ Bengaluru Weather</span><strong id="weatherStatus">--</strong><small id="weatherHint">--</small></article>\n          <article class="summary-card"><span>🪣 Tank</span>')
+          h = h.replace('<article class="summary-card"><span>Flow</span>', '<article class="summary-card"><span>💧 Flow</span>')
+          h = h.replace('<div class="section-head"><div><h2>Watering History</h2><p>Latest watering sessions and results.</p></div></div>', '<div class="section-head"><div><h2>Watering History</h2><p>Latest watering sessions and results.</p></div></div>')
+          h = h.replace('<div id="history" class="history"><div class="empty">No watering history yet.</div></div>', '<div id="history" class="history"><div class="empty">No watering history yet.</div></div>\n            <div class="section-head connectivity-head"><div><h2>Connectivity History</h2><p>Wi-Fi events are buffered locally when the network is unavailable and uploaded after reconnection.</p></div></div>\n            <div id="connectivityHistory" class="history"><div class="empty">No connectivity events yet.</div></div>')
+          p.write_text(h)
+
+          # Dashboard JS enhancements.
+          p = Path('v2/app.js'); js = p.read_text()
+          js = js.replace('let telemetry=[];let wateringHistory=[];', 'let telemetry=[];let wateringHistory=[];let connectivityHistory=[];')
+          js = js.replace('function plantCard(p,i){const m=Math.max(0,Math.min(100,Number(p.moisture)||0));const fault=p.fault?\'fault\':\'good\';const watering=p.watering?\'Watering\':p.soaking?\'Soaking\':\'Idle\';return `<article class="plant-card" data-i="${i}">', 'function plantCondition(p){if(p.fault)return {icon:"⚠️",label:"Needs attention",cls:"plant-fault"};if(p.watering)return {icon:"💦",label:"Watering",cls:"plant-watering"};if(p.soaking)return {icon:"🫧",label:"Soaking",cls:"plant-soaking"};const m=Number(p.moisture)||0;if(m<p.targetLow)return {icon:"🥀",label:"Dry",cls:"plant-dry"};if(m>p.targetHigh)return {icon:"🌿",label:"Moist",cls:"plant-wet"};return {icon:"🌱",label:"Healthy",cls:"plant-healthy"};}\nfunction plantCard(p,i){const m=Math.max(0,Math.min(100,Number(p.moisture)||0));const fault=p.fault?\'fault\':\'good\';const watering=p.watering?\'Watering\':p.soaking?\'Soaking\':\'Idle\';const c=plantCondition(p);return `<article class="plant-card ${c.cls}" data-i="${i}">')
+          js = js.replace('<div class="plant-top"><div><div class="plant-name">${esc(p.name||`Plant ${i+1}`)}</div>', '<div class="plant-top"><div class="plant-title-wrap"><div class="plant-icon" title="${esc(c.label)}">${c.icon}</div><div><div class="plant-name">${esc(p.name||`Plant ${i+1}`)}</div>')
+          js = js.replace('<small class="${fault}">${p.fault?\'Fault detected\':\'Sensor healthy\'}</small></div><span class="mode">', '<small class="${fault}">${p.fault?\'Fault detected\':\'Sensor healthy\'}</small></div></div><span class="mode">')
+          js = js.replace('<div class="moisture">${m}%</div>', '<div class="moisture-row"><div class="moisture">${m}%</div><span class="condition-chip ${c.cls}">${c.icon} ${c.label}</span></div>')
+          js = js.replace('document.getElementById(\'flowHint\').textContent=s.flowSensorEnabled?`${s.flowPulses||0} pulses`:\'Time-based fallback\';', 'document.getElementById(\'flowHint\').textContent=s.flowSensorEnabled?`${s.flowPulses||0} pulses`:\'Time-based fallback\';const weatherEl=document.getElementById(\'weatherStatus\');const weatherHint=document.getElementById(\'weatherHint\');if(weatherEl){weatherEl.textContent=s.weatherValid?(s.weatherDelayAuto?\'Rain likely — delayed\':\'No significant rain\'):\'Sensor-only mode\';weatherHint.textContent=s.weatherValid?`${s.weatherRainProbability||0}% rain · ${Number(s.weatherRainMm6h||0).toFixed(1)} mm / 6h`:\'Weather unavailable\';}')
+          js = js.replace('const [t,h]=await Promise.all([get(\'/history/telemetry\'),get(\'/history/watering\')]);telemetry=rows(t).slice(-48);wateringHistory=rows(h).slice(-30).reverse();renderChart();renderHistory()', 'const [t,h,c]=await Promise.all([get(\'/history/telemetry\'),get(\'/history/watering\'),get(\'/history/connectivity\')]);telemetry=rows(t).slice(-48);wateringHistory=rows(h).slice(-30).reverse();connectivityHistory=rows(c).slice(-40).reverse();renderChart();renderHistory();renderConnectivityHistory()')
+          js = js.replace('function renderHistory(){', 'function renderConnectivityHistory(){const el=document.getElementById(\'connectivityHistory\');if(!el)return;if(!connectivityHistory.length){el.innerHTML=\'<div class="empty">No connectivity events yet.</div>\';return}el.innerHTML=connectivityHistory.map(x=>{const t=x.epochMs?new Date(Number(x.epochMs)).toLocaleString():`Uptime ${Math.round(Number(x.uptimeMs||0)/1000)} sec`;const icon=x.type===\'WIFI_CONNECTED\'?\'🟢\':x.type===\'WIFI_DISCONNECTED\'?\'🔴\':\'🔄\';return `<div class="history-item connectivity-item"><strong>${icon} ${esc((x.type||\'EVENT\').replaceAll(\'_\',\' \'))}</strong><small>${esc(t)} · ${esc(x.reason||\'\')}</small></div>`}).join(\'\')}\nfunction renderHistory(){')
+          js = js.replace('plants.forEach((_,pi)=>{', 'const lineColors=["#0f766e","#2563eb","#d97706","#7c3aed","#dc2626"];plants.forEach((_,pi)=>{')
+          js = js.replace('stroke="hsl(${(pi*67)%360} 55% 42%)"', 'stroke="${lineColors[pi%lineColors.length]}"')
+          js = js.replace('${plants.map((p,i)=>`<span>● ${esc(p.name||`Plant ${i+1}`)}</span>`).join(\'\')}', '${plants.map((p,i)=>`<span class="legend-item"><i style="background:${lineColors[i%lineColors.length]}"></i>${esc(p.name||`Plant ${i+1}`)}</span>`).join(\'\')}')
+          js = js.replace('loadHistory();setInterval(refresh,CFG.refreshMs);setInterval(loadHistory,60000);', 'loadHistory();setInterval(refresh,CFG.refreshMs);setInterval(loadHistory,60000);')
+          p.write_text(js)
+
+          # Styling enhancements.
+          p = Path('v2/styles.css'); css = p.read_text()
+          css += '''\n.plant-title-wrap{display:flex;align-items:center;gap:10px}.plant-icon{width:46px;height:46px;display:grid;place-items:center;border-radius:14px;background:#ecfdf5;font-size:27px;box-shadow:inset 0 0 0 1px rgba(15,118,110,.10)}.moisture-row{display:flex;align-items:center;justify-content:space-between;gap:10px}.condition-chip{font-size:12px;font-weight:800;padding:7px 10px;border-radius:999px;background:#f0fdf4}.plant-fault{border-color:#fecaca}.plant-dry .plant-icon,.plant-fault .plant-icon{background:#fff1f2}.plant-watering .plant-icon{background:#eff6ff}.plant-soaking .plant-icon{background:#f0f9ff}.plant-wet .plant-icon{background:#ecfdf5}.connectivity-head{margin-top:24px}.connectivity-item{display:flex;flex-direction:column;gap:3px}.legend-item{display:inline-flex;align-items:center;gap:5px}.legend-item i{display:inline-block;width:12px;height:3px;border-radius:4px}.summary-card{transition:transform .18s ease,box-shadow .18s ease}.summary-card:hover{transform:translateY(-2px);box-shadow:0 14px 30px rgba(15,118,110,.12)}.plant-card{transition:transform .18s ease,box-shadow .18s ease}.plant-card:hover{transform:translateY(-3px);box-shadow:0 16px 35px rgba(15,118,110,.12)}\n'''
+          p.write_text(css)
+
+          # Simple vector favicon.
+          Path('v2/plant-icon.svg').write_text('''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#0f766e"/><path d="M31 51V30c-8 0-16-5-17-16 11-1 20 4 20 14V51h-3Z" fill="#d1fae5"/><path d="M34 45V24c1-10 9-15 19-14-1 11-8 17-19 18" fill="#a7f3d0"/><path d="M27 52h15" stroke="#fff" stroke-width="4" stroke-linecap="round"/></svg>''')
+          PY
+      - name: Verify changes
+        run: |
+          grep -q 'WEATHER_API_URL' Plant_Watering_Smart_V2_OTA.ino
+          grep -q 'weatherAllowsAutomaticWatering' Plant_Watering_Smart_V2_OTA.ino
+          grep -q 'history/connectivity' Plant_Watering_Smart_V2_OTA.ino
+          grep -q 'Bengaluru Weather' v2/index.html
+          grep -q 'plant-icon.svg' v2/index.html
+          grep -q 'plantCondition' v2/app.js
+          test -s v2/plant-icon.svg
+      - name: Commit changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Plant_Watering_Smart_V2_OTA.ino v2/index.html v2/app.js v2/styles.css v2/plant-icon.svg
+          git rm .github/weather-dashboard-enhancement-trigger
+          git commit -m 'feat: add weather-aware watering and dashboard enhancements'
+          git push
