@@ -522,7 +522,27 @@ void setupLocalOta(){
 void lcdLine(uint8_t row,String t){while(t.length()<LCD_COLS)t+=" ";if(t.length()>LCD_COLS)t=t.substring(0,LCD_COLS);lcd.setCursor(0,row);lcd.print(t);}
 void refreshLcd(){if(millis()-lastLcdMs<LCD_UPDATE_MS)return;lastLcdMs=millis();if(!systemReady){lcdLine(0,"Plant Care V2");lcdLine(1,"Starting safely");return;}if(emergencyStop){lcdLine(0,"EMERGENCY STOP");lcdLine(1,"Pump disabled");return;}if(tankEmpty){lcdLine(0,"TANK EMPTY");lcdLine(1,"Pump disabled");return;}if(!bootAllowsWatering()){lcdLine(0,"Safety startup");lcdLine(1,"Checking sensors");return;}if(millis()-lastRotateMs>=LCD_ROTATE_MS){lastRotateMs=millis();displayPlant=(displayPlant+1)%NUM_PLANTS;}int i=activePlant>=0?activePlant:displayPlant;lcdLine(0,plants[i].name+":"+String(states[i].moisture)+"%");String l2=states[i].watering?"Watering "+modeText(plants[i].mode):states[i].soaking?"Soaking...":states[i].sensorFault?"Sensor fault":modeText(plants[i].mode)+" / "+String(plants[i].targetLow)+"-"+String(plants[i].targetHigh);lcdLine(1,l2);}
 void beginWifi(){WiFi.persistent(false);WiFi.mode(WIFI_STA);WiFi.setAutoReconnect(true);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);lastWifiRetryMs=millis();}
-void maintainWifi(){bool c=WiFi.status()==WL_CONNECTED;if(c){if(!wifiConnected){wifiConnected=true;deviceIp=WiFi.localIP().toString();prefs.putBool("wifiWasConnected",true);Serial.print("WiFi connected: ");Serial.println(deviceIp);configTime(0,0,"pool.ntp.org","time.nist.gov");recordConnectivityEvent("WIFI_CONNECTED",deviceIp);flushConnectivityHistory();}return;}if(wifiConnected){saveConnectivityEventLocal("WIFI_DISCONNECTED","WiFi connection lost");wifiConnected=false;deviceIp="offline";}else deviceIp="offline";if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){lastWifiRetryMs=millis();WiFi.disconnect();beginWifi();}}
+void maintainWifi(){
+  bool c=WiFi.status()==WL_CONNECTED;
+  if(c){
+    if(!wifiConnected){
+      wifiConnected=true; deviceIp=WiFi.localIP().toString();
+      prefs.putBool("wifiWasConnected",true);
+      Serial.print("WiFi connected: "); Serial.println(deviceIp);
+      configTime(0,0,"pool.ntp.org","time.nist.gov");
+      recordConnectivityEvent("WIFI_CONNECTED",deviceIp);
+      flushConnectivityHistory();
+    }
+    return;
+  }
+  if(wifiConnected){
+    saveConnectivityEventLocal("WIFI_DISCONNECTED","WiFi connection lost");
+    wifiConnected=false; deviceIp="offline";
+  }else deviceIp="offline";
+  if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){
+    lastWifiRetryMs=millis(); WiFi.disconnect(); beginWifi();
+  }
+}
 void updateClock(){if(timeSynced)return;time_t now=time(nullptr);if(now>=1700000000){timeSynced=true;Serial.println("NTP time synchronized");for(int i=0;i<NUM_PLANTS;i++)loadRuntimeLimits(i);}}
 
 void setup(){
