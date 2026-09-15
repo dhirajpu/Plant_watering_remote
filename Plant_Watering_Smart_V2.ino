@@ -43,8 +43,8 @@
 */
 
 // ========================= NETWORK =========================
-static const char *WIFI_SSID = "YOUR_WIFI_NAME";
-static const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+static const char *WIFI_SSID = "Airtel_Dhiraj";
+static const char *WIFI_PASSWORD = "Airtel@9798";
 static const char *FIREBASE_BASE_URL = "https://vernal-catfish-196407.firebaseio.com";
 static const char *DEVICE_ROOT = "/plantMonitor/v2";
 static const char *FIREBASE_AUTH = "";
