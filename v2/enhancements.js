@@ -1,11 +1,11 @@
 (function(){
   const COLORS=['#0f766e','#2563eb','#d97706','#7c3aed','#dc2626'];
   const baseRenderStatus=window.renderStatus;
-  const baseRenderDiagnostics=window.renderDiagnostics;
-  const baseRenderOta=window.renderOta;
   const baseGet=window.get;
   const baseRows=window.rows;
   let connectivityHistory=[];
+  let telemetry=[];
+  let currentStatus=null;
 
   function decoratePlants(){
     document.querySelectorAll('.plant-card').forEach((card,i)=>{
@@ -23,11 +23,11 @@
       const rawState=(state?.textContent||'').toLowerCase();
       const m=Number((moisture?.textContent||'').replace('%',''));
       let icon='🌱';
-      if(card.classList.contains('fault')||card.querySelector('.fault')) icon='⚠️';
-      else if(rawState.includes('watering')) icon='💦';
-      else if(rawState.includes('soaking')) icon='🫧';
-      else if(m<Number(card.dataset.low||0)) icon='🥀';
-      else if(rawState==='idle') icon='🌱';
+      if(card.querySelector('.fault'))icon='⚠️';
+      else if(rawState.includes('watering'))icon='💦';
+      else if(rawState.includes('soaking'))icon='🫧';
+      else if(rawState==='idle')icon='🌱';
+      else if(m<30)icon='🥀';
       const ci=card.querySelector('.plant-condition-icon'); if(ci)ci.textContent=icon;
       if(moisture)moisture.style.color=color;
       const bar=card.querySelector('.bar>div'); if(bar)bar.style.background=color;
@@ -44,6 +44,7 @@
   }
 
   window.renderStatus=function(s){
+    currentStatus=s;
     baseRenderStatus(s);
     updateWeather(s);
     decoratePlants();
@@ -51,8 +52,7 @@
 
   window.renderChart=function(){
     const el=document.getElementById('chart');
-    if(!window.telemetry?.length){el.innerHTML='<div class="empty">No telemetry yet.</div>';return;}
-    const telemetry=window.telemetry;
+    if(!telemetry.length){el.innerHTML='<div class="empty">No telemetry yet.</div>';return;}
     const plants=telemetry[telemetry.length-1]?.plants||[];
     const W=700,H=230,pad=25;
     let paths='';
@@ -82,7 +82,7 @@
   window.loadHistory=async function(){
     try{
       const [t,h,c]=await Promise.all([baseGet('/history/telemetry'),baseGet('/history/watering'),baseGet('/history/connectivity')]);
-      window.telemetry=baseRows(t).slice(-48);
+      telemetry=baseRows(t).slice(-48);
       window.wateringHistory=baseRows(h).slice(-30).reverse();
       connectivityHistory=baseRows(c).slice(-40).reverse();
       window.renderChart();
@@ -92,7 +92,7 @@
   };
 
   const oldRefresh=window.refresh;
-  window.refresh=async function(){await oldRefresh();if(window.lastStatus)updateWeather(window.lastStatus);decoratePlants();};
+  window.refresh=async function(){await oldRefresh();if(currentStatus)updateWeather(currentStatus);decoratePlants();};
 
   setTimeout(()=>{window.refresh();window.loadHistory();},250);
   setInterval(()=>{window.refresh();},5000);
