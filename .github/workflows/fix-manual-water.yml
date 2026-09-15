@@ -1,0 +1,44 @@
+name: Fix manual watering command
+
+on:
+  push:
+    paths:
+      - .github/manual-water-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix epoch timestamp parsing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('Plant_Watering_Smart_V2_OTA.ino')
+          s=p.read_text(encoding='utf-8')
+          old='long jsonLongValue(const String &json, const String &key, long fallback) { String v = jsonStringValue(json, key, ""); if (!v.length() || v == "null") return fallback; return v.toInt(); }'
+          new=old+'\nuint64_t jsonUint64Value(const String &json, const String &key, uint64_t fallback) { String v = jsonStringValue(json, key, ""); if (!v.length() || v == "null") return fallback; return strtoull(v.c_str(), nullptr, 10); }'
+          if 'uint64_t jsonUint64Value' not in s:
+              if old not in s: raise SystemExit('jsonLongValue marker not found')
+              s=s.replace(old,new,1)
+          old2='bool commandTimestampValid(const String &json){uint64_t issued=(uint64_t)jsonLongValue(json,"issuedAtEpochMs",0);if(!issued)return false;uint64_t now=epochMs();if(!now)return false;return issued<=now+REMOTE_COMMAND_FUTURE_SKEW_MS && now-issued<=REMOTE_COMMAND_MAX_AGE_MS;}'
+          new2='bool commandTimestampValid(const String &json){uint64_t issued=jsonUint64Value(json,"issuedAtEpochMs",0);if(!issued)return false;uint64_t now=epochMs();if(!now)return false;if(issued>now+REMOTE_COMMAND_FUTURE_SKEW_MS)return false;return now-issued<=REMOTE_COMMAND_MAX_AGE_MS;}'
+          if old2 in s: s=s.replace(old2,new2,1)
+          elif 'issued=jsonUint64Value(json,"issuedAtEpochMs",0)' not in s: raise SystemExit('commandTimestampValid marker not found')
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Verify
+        run: |
+          grep -q 'uint64_t jsonUint64Value' Plant_Watering_Smart_V2_OTA.ino
+          grep -q 'issued=jsonUint64Value(json,"issuedAtEpochMs",0)' Plant_Watering_Smart_V2_OTA.ino
+      - name: Commit
+        run: |
+          rm -f .github/manual-water-trigger
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Plant_Watering_Smart_V2_OTA.ino .github/manual-water-trigger
+          git commit -m 'fix: accept 64-bit manual watering timestamps'
+          git push
