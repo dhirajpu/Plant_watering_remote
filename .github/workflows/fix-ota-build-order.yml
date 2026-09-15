@@ -1,0 +1,82 @@
+name: Fix OTA firmware build order
+
+on:
+  push:
+    paths:
+      - '.github/fix-ota-build-order.trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reorder weather block and fix integer type
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('Plant_Watering_Smart_V2_OTA.ino')
+          text = path.read_text(encoding='utf-8')
+
+          marker = '// ========================= WEATHER / CONNECTIVITY ========================='
+          hardware = '// ========================= HARDWARE ========================='
+          if marker not in text or hardware not in text:
+              raise SystemExit('Weather/hardware markers not found')
+
+          start = text.index(marker)
+          end = text.index(hardware, start)
+          weather = text[start:end]
+          text = text[:start] + text[end:]
+
+          # The weather block depends on globals, enums, Preferences and httpPostJson.
+          # Insert it immediately after the httpPostJson function.
+          post_marker = 'bool httpPostJson(const String &path,const String &json)'
+          pos = text.find(post_marker)
+          if pos < 0:
+              raise SystemExit('httpPostJson function not found')
+
+          brace = text.find('{', pos)
+          if brace < 0:
+              raise SystemExit('httpPostJson opening brace not found')
+          depth = 0
+          close = None
+          for i in range(brace, len(text)):
+              if text[i] == '{':
+                  depth += 1
+              elif text[i] == '}':
+                  depth -= 1
+                  if depth == 0:
+                      close = i + 1
+                      break
+          if close is None:
+              raise SystemExit('httpPostJson closing brace not found')
+
+          text = text[:close] + '\n\n' + weather + text[close:]
+
+          # Arduino ESP32 3.x resolves String::toInt() as long; make both max operands int.
+          text = text.replace('maxProbability=max(maxProbability,p.toInt());',
+                              'maxProbability=max(maxProbability,(int)p.toInt());')
+
+          path.write_text(text, encoding='utf-8')
+
+          # Basic structural validation.
+          if text.count(marker) != 1:
+              raise SystemExit('Weather block count is not exactly one')
+          if text.count(hardware) != 1:
+              raise SystemExit('Hardware marker count is not exactly one')
+          if text.index(marker) < text.index(post_marker):
+              raise SystemExit('Weather block was not moved after httpPostJson')
+
+      - name: Commit firmware fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Plant_Watering_Smart_V2_OTA.ino
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: repair OTA firmware declaration order'
+          git push
