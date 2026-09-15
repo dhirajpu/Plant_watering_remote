@@ -1,0 +1,38 @@
+name: Fix emergency stop
+on:
+  push:
+    paths:
+      - '.github/emergency-stop-fix-trigger'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch emergency stop handling
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Plant_Watering_Smart_V2_OTA.ino')
+          s = p.read_text()
+          old = '''if(!commandTimestampValid(json)){lastCommandId=id;prefs.putString("lastCmd",lastCommandId);acknowledgeCommand(id,"expired_or_clock_unavailable");return;}if(action=="emergency_stop"){emergencyStop=true;prefs.putBool("eStop",true);emergencyHardwareStop(STOP_EMERGENCY);result="stopped";}else if(action=="resume"){emergencyStop=false;prefs.putBool("eStop",false);result="resumed";}'''
+          new = '''if(action!="emergency_stop"&&!commandTimestampValid(json)){lastCommandId=id;prefs.putString("lastCmd",lastCommandId);acknowledgeCommand(id,"expired_or_clock_unavailable");return;}if(action=="emergency_stop"){emergencyStop=true;prefs.putBool("eStop",true);for(int i=0;i<NUM_PLANTS;i++){states[i].manualRequest=false;states[i].manualRequestedMl=0;states[i].manualRequestedMs=0;states[i].soaking=false;}emergencyHardwareStop(STOP_EMERGENCY);forceAllOutputsOff();result="stopped";}else if(action=="resume"){emergencyStop=false;prefs.putBool("eStop",false);forceAllOutputsOff();result="resumed";}'''
+          if old not in s:
+              raise SystemExit('expected emergency command block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Verify
+        run: |
+          grep -q 'action!="emergency_stop"&&!commandTimestampValid(json)' Plant_Watering_Smart_V2_OTA.ino
+          grep -q 'states\[i\].manualRequest=false' Plant_Watering_Smart_V2_OTA.ino
+          grep -q 'forceAllOutputsOff();result="stopped"' Plant_Watering_Smart_V2_OTA.ino
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Plant_Watering_Smart_V2_OTA.ino
+          git rm .github/emergency-stop-fix-trigger
+          git commit -m 'fix: make emergency stop immediate and clear queued watering'
+          git push
