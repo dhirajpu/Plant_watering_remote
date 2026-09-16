@@ -2,12 +2,12 @@ const CFG=window.PLANT_V2_CONFIG;let lastStatus=null;let lastLiveAt=0;let teleme
 function url(path){let u=`${CFG.firebaseBaseUrl}${CFG.deviceRoot}${path}.json`;if(CFG.authToken)u+=`?auth=${encodeURIComponent(CFG.authToken)}`;return u}
 async function get(path){const r=await fetch(url(path),{cache:'no-store'});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}
 async function put(path,data){const r=await fetch(url(path),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}
-function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]) )}
+function esc(v){return String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]) )}
 function fmtMin(v){const n=Number(v||0);return n<60?`${n} min`:`${Math.floor(n/60)}h ${n%60}m`}
 function fmtHistoryDate(v){if(!v)return '';const d=new Date(v);return Number.isNaN(d.getTime())?'':d.toLocaleString(undefined,{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function toast(msg){const e=document.getElementById('toast');e.textContent=msg;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,3000)}
 function commandId(){return `${Date.now()}-${Math.random().toString(16).slice(2)}`}
-async function sendCommand(action,extra={}){const id=commandId();await put('/command',{id,action,...extra,issuedAtEpochMs:Date.now()});toast(`Command sent: ${action.replaceAll('_',' ')}`);return id}
+async function sendCommand(action,extra={}){const id=commandId();await put('/command',{id,action,...extra,issuedAtEpochSec:Math.floor(Date.now()/1000)});toast(`Command sent: ${action.replaceAll('_',' ')}`);return id}
 function plantCard(p,i){const m=Math.max(0,Math.min(100,Number(p.moisture)||0));const fault=p.fault?'fault':'good';const watering=p.watering?'Watering':p.soaking?'Soaking':'Idle';const faultReason=String(p.faultReason??'').trim();return `<article class="plant-card" data-i="${i}">
 <div class="plant-top"><div><div class="plant-name">${esc(p.name||`Plant ${i+1}`)}</div><small class="${fault}">${p.fault?'Fault detected':'Sensor healthy'}</small>${p.fault&&faultReason?`<div class="fault-reason"><strong>Reason:</strong> ${esc(faultReason)}</div>`:''}</div><span class="mode">${esc(p.mode||'AUTO')}</span></div>
 <div class="moisture">${m}%</div><div class="bar"><div style="width:${m}%"></div></div>
