@@ -24,7 +24,7 @@ static const char *FIREBASE_BASE_URL = "https://vernal-catfish-196407.firebaseio
 static const char *DEVICE_ROOT = "/plantMonitor/v2";
 static const char *FIREBASE_AUTH = "";
 static const char *OTA_PASSWORD = "";
-static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.1";
+static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.2";
 static const char *OTA_USER = "admin";
 
 static const int NUM_PLANTS = 5;
@@ -176,13 +176,20 @@ void evaluateWatering(){
   if(activePlant<0)return;int i=activePlant;PlantState&s=states[i];PlantConfig&c=plants[i];
   if(emergencyStop){stopBurst(i,STOP_EMERGENCY);activePlant=-1;return;}
   if(s.sensorFault){stopBurst(i,STOP_SENSOR_FAULT);activePlant=-1;return;}
-  if(s.watering){unsigned long run=millis()-s.burstStartMs;if(run>=c.burstMs||s.sessionPumpMs+run>=c.maxSessionMs){s.sessionPumpMs+=run;s.watering=false;digitalWrite(PUMP_PIN,RELAY_OFF);delay(VALVE_POSTPUMP_MS);closeAllValves();s.soaking=true;s.soakUntilMs=millis()+c.soakMs;return;}if(s.manualRequest&&s.sessionPumpMs+run>=s.manualRequestedMs){s.sessionPumpMs+=run;finishSession(i,STOP_MANUAL_COMPLETE);return;}}
+  if(s.watering){unsigned long run=millis()-s.burstStartMs;if(run>=c.burstMs||s.sessionPumpMs+run>=c.maxSessionMs){s.sessionPumpMs+=run;s.watering=false;digitalWrite(PUMP_PIN,RELAY_OFF);delay(VALVE_POSTPUMP_MS);closeAllValves();s.soaking=true;s.soakUntilMs=millis()+c.soakMs;return;}if(s.manualRequest&&s.sessionPumpMs+run>=s.manualRequestedMs){s.sessionPumpMs+=run;s.watering=false;digitalWrite(PUMP_PIN,RELAY_OFF);delay(VALVE_POSTPUMP_MS);closeAllValves();finishSession(i,STOP_MANUAL_COMPLETE);return;}}
   if(s.soaking){if(millis()<s.soakUntilMs)return;s.soaking=false;if(s.manualRequest){finishSession(i,STOP_MANUAL_COMPLETE);return;}if(s.moisture>=c.targetHigh){finishSession(i,STOP_TARGET_REACHED);return;}if(s.responseDeadlineMs&&millis()>=s.responseDeadlineMs&&s.moisture-s.moistureAtSessionStart<MIN_MOISTURE_GAIN_PERCENT){setWaterFault(i,"Soil moisture did not increase after watering");finishSession(i,STOP_WATER_RESPONSE);return;}if(millis()-s.sessionStartMs>=c.maxSessionMs){finishSession(i,STOP_SESSION_LIMIT);return;}startBurst(i);return;}
   if(!s.watering&&!s.soaking)startBurst(i);
 }
 
 void updateConfig(){for(int i=0;i<NUM_PLANTS;i++){String b;if(!httpGet(String("/config/plants/")+i,b)||!b.length()||b=="null")continue;String n=jsonValue(b,"name");if(n.length())plants[i].name=n;plants[i].targetLow=constrain((int)jsonLong(b,"targetLow",plants[i].targetLow),0,95);plants[i].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[i].targetHigh),plants[i].targetLow+1,100);plants[i].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[i].burstMs),1000UL,plants[i].maxBurstMs);plants[i].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[i].soakMs/1000UL),10UL,1800UL)*1000UL;plants[i].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[i].minIntervalMs/60000UL),1UL,1440UL)*60000UL;String m=jsonValue(b,"mode");if(m.length())plants[i].mode=parseMode(m);}}
-void handleCommand(){String b;if(!httpGet("/command",b)||b.length()<2||b=="null")return;String id=jsonValue(b,"id");if(!id.length()||id==lastCommandId)return;String action=jsonValue(b,"action");int p=(int)jsonLong(b,"plantIndex",-1);unsigned long issued=(unsigned long)jsonLong(b,"issuedAtEpochMs",0);bool valid=true;if(action!="emergency_stop"&&timeSynced&&issued){unsigned long now=(unsigned long)time(nullptr)*1000UL;if(issued+REMOTE_COMMAND_MAX_AGE_MS<now||issued>now+REMOTE_COMMAND_FUTURE_SKEW_MS)valid=false;}String result="ignored";
+
+void handleCommand(){
+  String b;if(!httpGet("/command",b)||b.length()<2||b=="null")return;String id=jsonValue(b,"id");if(!id.length()||id==lastCommandId)return;String action=jsonValue(b,"action");int p=(int)jsonLong(b,"plantIndex",-1);
+  long issuedSec=jsonLong(b,"issuedAtEpochSec",0);
+  if(issuedSec<=0){long legacyMs=jsonLong(b,"issuedAtEpochMs",0);if(legacyMs>0)issuedSec=legacyMs/1000L;}
+  bool valid=true;
+  if(action!="emergency_stop"&&timeSynced&&issuedSec>0){long nowSec=(long)time(nullptr);long ageSec=nowSec-issuedSec;if(ageSec<-(long)(REMOTE_COMMAND_FUTURE_SKEW_MS/1000UL)||ageSec>(long)(REMOTE_COMMAND_MAX_AGE_MS/1000UL))valid=false;}
+  String result="ignored";
   if(!valid)result="expired";else if(action=="emergency_stop"){emergencyStop=true;outputsOff();if(activePlant>=0)states[activePlant].lastStopReason=STOP_EMERGENCY;activePlant=-1;saveEmergency();result="stopped";}
   else if(action=="resume"){emergencyStop=false;outputsOff();saveEmergency();result="resumed";}
   else if(action=="set_mode"&&p>=0&&p<NUM_PLANTS){plants[p].mode=parseMode(jsonValue(b,"mode"));result="mode_set";}
@@ -199,10 +206,48 @@ String statusJson(){String j="{\"firmware\":\""+String(FIRMWARE_VERSION)+"\",\"o
 void publishStatus(){if(!wifiConnected)return;httpPut("/status",statusJson());lastStatusMs=millis();}
 void publishTelemetry(){if(!wifiConnected)return;httpPost("/history/telemetry",statusJson());lastTelemetryMs=millis();}
 
+String historyTimestamp(){if(!timeSynced)return "";time_t now=time(nullptr);struct tm tmNow;localtime_r(&now,&tmNow);char buf[24];strftime(buf,sizeof(buf),"%Y-%m-%d %H:%M:%S",&tmNow);return String(buf);}
+unsigned long long historyEpochMs(){if(!timeSynced)return 0;return (unsigned long long)time(nullptr)*1000ULL;}
+
 void refreshLcd(){lcd.clear();if(activePlant>=0){lcd.setCursor(0,0);lcd.print(plants[activePlant].name.substring(0,16));lcd.setCursor(0,1);lcd.print(states[activePlant].watering?"Watering":states[activePlant].soaking?"Soaking":"Running");return;}int i=displayPlant%NUM_PLANTS;lcd.setCursor(0,0);lcd.print(plants[i].name.substring(0,16));lcd.setCursor(0,1);if(states[i].sensorFault)lcd.print("Sensor fault");else if(states[i].waterResponseFault)lcd.print("Water response");else {lcd.print(states[i].moisture);lcd.print("% ");lcd.print(modeText(plants[i].mode));}}
 
-void handleUpdate(){if(!server.authenticate(OTA_USER,OTA_PASSWORD)){server.requestAuthentication();return;}HTTPUpload &up=server.upload();if(up.status==UPLOAD_FILE_START){otaInProgress=true;outputsOff();if(!Update.begin(UPDATE_SIZE_UNKNOWN))Update.printError(Serial);}else if(up.status==UPLOAD_FILE_WRITE){if(Update.write(up.buf,up.currentSize)!=up.currentSize)Update.printError(Serial);}else if(up.status==UPLOAD_FILE_END){if(Update.end(true))server.send(200,"text/plain","Update successful. Rebooting...");else {Update.printError(Serial);server.send(500,"text/plain","Update failed");}delay(500);ESP.restart();}}
-void setupOTA(){ArduinoOTA.setHostname("plant-life-care-v2");ArduinoOTA.setPassword(OTA_PASSWORD);ArduinoOTA.onStart([](){otaInProgress=true;outputsOff();});ArduinoOTA.onEnd([](){outputsOff();otaInProgress=false;});ArduinoOTA.begin();server.on("/update",HTTP_POST,[](){server.send(200,"text/plain","OK");},handleUpdate);server.begin();}
+void handleUpdateUpload(){
+  HTTPUpload &up=server.upload();
+  if(up.status==UPLOAD_FILE_START){
+    if(OTA_PASSWORD[0]&&!server.authenticate(OTA_USER,OTA_PASSWORD)){return;}
+    otaInProgress=true;outputsOff();
+    Serial.printf("OTA upload started: %s\n",up.filename.c_str());
+    if(!Update.begin(UPDATE_SIZE_UNKNOWN)){Update.printError(Serial);otaInProgress=false;outputsOff();}
+  }else if(up.status==UPLOAD_FILE_WRITE){
+    if(!otaInProgress)return;
+    if(Update.write(up.buf,up.currentSize)!=up.currentSize){Update.printError(Serial);otaInProgress=false;}
+  }else if(up.status==UPLOAD_FILE_END){
+    if(!otaInProgress)return;
+    if(Update.end(true))Serial.printf("OTA upload complete: %u bytes\n",up.totalSize);else {Update.printError(Serial);otaInProgress=false;outputsOff();}
+  }else if(up.status==UPLOAD_FILE_ABORTED){Update.abort();otaInProgress=false;outputsOff();}
+}
+
+void setupOTA(){
+  ArduinoOTA.setHostname("plant-life-care-v2");
+  if(OTA_PASSWORD[0])ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.onStart([](){otaInProgress=true;outputsOff();});
+  ArduinoOTA.onEnd([](){outputsOff();otaInProgress=false;});
+  ArduinoOTA.begin();
+
+  server.on("/update",HTTP_GET,[](){
+    if(OTA_PASSWORD[0]&&!server.authenticate(OTA_USER,OTA_PASSWORD)){server.requestAuthentication();return;}
+    String page="<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Plant Life Care OTA</title></head><body><h2>Plant Life Care V2 OTA Update</h2><form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='firmware' accept='.bin' required><br><br><button type='submit'>Upload firmware</button></form></body></html>";
+    server.send(200,"text/html",page);
+  });
+  server.on("/update",HTTP_POST,[](){
+    if(OTA_PASSWORD[0]&&!server.authenticate(OTA_USER,OTA_PASSWORD)){server.requestAuthentication();return;}
+    server.sendHeader("Connection","close");
+    if(Update.hasError()){server.send(500,"text/plain","OTA update failed");otaInProgress=false;outputsOff();return;}
+    server.send(200,"text/plain","OTA update successful. Rebooting...");
+    delay(500);ESP.restart();
+  },handleUpdateUpload);
+  server.begin();
+}
 void connectWifi(){WiFi.mode(WIFI_STA);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);unsigned long start=millis();while(WiFi.status()!=WL_CONNECTED&&millis()-start<15000)delay(250);wifiConnected=WiFi.status()==WL_CONNECTED;deviceIp=wifiConnected?WiFi.localIP().toString():"offline";if(wifiConnected){configTime(19800,0,"pool.ntp.org","time.nist.gov");for(int i=0;i<20;i++){time_t now=time(nullptr);if(now>1700000000){timeSynced=true;break;}delay(100);}}}
 
 void setup(){
