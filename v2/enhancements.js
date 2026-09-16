@@ -23,11 +23,12 @@
       card.style.borderLeft=`5px solid ${color}`;
       let icon='🌱';
       let conditionClass='plant-healthy';
-      if(p.fault||card.querySelector('.fault')){icon='⚠️';conditionClass='plant-fault';}
-      else if(rawState.includes('watering')){icon='💦';conditionClass='plant-watering';}
-      else if(rawState.includes('soaking')){icon='🫧';conditionClass='plant-soaking';}
-      else if(m<low){icon='🥀';conditionClass='plant-dry';}
-      else if(m>high){icon='🌿';conditionClass='plant-wet';}
+      let conditionLabel='OPTIMAL';
+      if(p.fault||card.querySelector('.fault')){icon='⚠️';conditionClass='plant-fault';conditionLabel='FAULT';}
+      else if(rawState.includes('watering')){icon='💦';conditionClass='plant-watering';conditionLabel='WATERING';}
+      else if(rawState.includes('soaking')){icon='🫧';conditionClass='plant-soaking';conditionLabel='SOAKING';}
+      else if(m<=low){icon='🥀';conditionClass='plant-dry';conditionLabel='DRY';}
+      else if(m>=high){icon='🌿';conditionClass='plant-wet';conditionLabel='WET';}
       card.classList.remove('plant-healthy','plant-wet','plant-dry','plant-watering','plant-soaking','plant-fault');
       card.classList.add(conditionClass);
       const name=card.querySelector('.plant-name');
@@ -37,7 +38,20 @@
         name.parentNode.insertBefore(iconEl,name);
       }
       const iconEl=card.querySelector('.plant-condition-icon');
-      if(iconEl){iconEl.textContent=icon;iconEl.title=conditionClass.replace('plant-','');}
+      if(iconEl){iconEl.textContent=icon;iconEl.title=conditionLabel;}
+      let labelEl=card.querySelector('.plant-condition-label');
+      if(!labelEl){
+        labelEl=document.createElement('div');
+        labelEl.className='plant-condition-label';
+        const top=card.querySelector('.plant-top');
+        const moistureWrap=moisture?.parentElement;
+        if(moistureWrap)moistureWrap.insertBefore(labelEl,moisture);
+        else if(top)top.insertAdjacentElement('afterend',labelEl);
+        else card.prepend(labelEl);
+      }
+      labelEl.className=`plant-condition-label ${conditionClass}`;
+      labelEl.textContent=`${icon} ${conditionLabel}`;
+      labelEl.title=conditionLabel==='DRY'?`Moisture is at or below Low (${low}%)`:conditionLabel==='WET'?`Moisture is at or above High (${high}%)`:conditionLabel==='OPTIMAL'?`Moisture is between Low (${low}%) and High (${high}%)`:conditionLabel;
       if(moisture)moisture.style.color=color;
       const bar=card.querySelector('.bar>div'); if(bar)bar.style.background=color;
     });
