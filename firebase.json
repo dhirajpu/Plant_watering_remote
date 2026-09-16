@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "target": "plantlifecare",
     "public": "v2",
     "ignore": [
       "firebase.json",
