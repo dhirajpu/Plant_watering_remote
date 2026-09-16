@@ -1,5 +1,14 @@
 {
   "projects": {
     "default": "vernal-catfish-196407"
+  },
+  "targets": {
+    "vernal-catfish-196407": {
+      "hosting": {
+        "plantlifecare": [
+          "plantlifecare"
+        ]
+      }
+    }
   }
 }
