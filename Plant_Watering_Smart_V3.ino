@@ -135,7 +135,7 @@ String safetyName(const String &v){String x=v;x.replace("\"","'");return x;}
 String resetReasonText(){switch(esp_reset_reason()){case ESP_RST_POWERON:return "Power-on";case ESP_RST_EXT:return "External reset";case ESP_RST_SW:return "Software reset";case ESP_RST_PANIC:return "Panic";case ESP_RST_INT_WDT:return "Interrupt watchdog";case ESP_RST_TASK_WDT:return "Task watchdog";case ESP_RST_WDT:return "Watchdog";case ESP_RST_BROWNOUT:return "Brownout";default:return "Unknown";}}
 
 
-String macHex(){
+String randomHex(size_t bytes);\nString macHex(){
   uint64_t mac=ESP.getEfuseMac();
   char out[13];
   snprintf(out,sizeof(out),"%012llX",(unsigned long long)mac);
