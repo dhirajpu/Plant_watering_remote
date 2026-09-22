@@ -82,7 +82,7 @@
     setDevice(deviceId);el('authShell').hidden=true;el('customerApp').hidden=false;
     el('customerUser').textContent=state.session.email||'Customer';el('customerDevice').textContent=deviceId;
     if(!document.getElementById('customerLogout')){const b=document.createElement('button');b.id='customerLogout';b.className='secondary';b.textContent='Sign out';b.onclick=()=>{clear();location.href=location.pathname};el('customerActions').appendChild(b)}
-    const s=document.createElement('script');s.src='./app.js?v='+Date.now();document.body.appendChild(s);
+    const s=document.createElement('script');s.src='./app.js?v='+Date.now();s.onload=()=>{const e=document.createElement('script');e.src='./enhancements.js?v='+Date.now();document.body.appendChild(e)};document.body.appendChild(s);
   }
   async function continueToDevice(){
     showError('');showStatus('Checking device ownership…');
