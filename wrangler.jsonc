@@ -1,13 +1,1 @@
-{
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "plant-life-care-v3",
-  "pages_build_output_dir": "./v3",
-  "compatibility_date": "2026-09-22",
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "plantcaremaindb",
-      "database_id": "bb073e27-66f0-4217-bec0-c1fbc9e4369a"
-    }
-  ]
-}
+{\n  "$schema": "node_modules/wrangler/config-schema.json",\n  "name": "plant-life-care-v3",\n  "main": "./worker.js",\n  "compatibility_date": "2026-09-22",\n  "assets": {\n    "directory": "./v3",\n    "binding": "ASSETS",\n    "run_worker_first": ["/api/*"]\n  },\n  "d1_databases": [\n    {\n      "binding": "DB",\n      "database_name": "plantcaremaindb",\n      "database_id": "bb073e27-66f0-4217-bec0-c1fbc9e4369a"\n    }\n  ]\n}\n
