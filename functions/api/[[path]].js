@@ -3,6 +3,8 @@ const DEVICE_RE = /^ESPBOARD-[A-F0-9]{6}$/;
 // The token is single-use; there is no time-based expiry because products may
 // remain in factory inventory or transit for an extended period.
 const FACTORY_PENDING_SECRET_HASH = "9d7f4c2a8b1e6f03d5c9a7b4e2f1c8d6a0b3e5f7c9d1a4b6e8f0c2d4a6b8e1f3";
+const TOKEN_TTL_MS = 15 * 60 * 1000; // Legacy factory endpoint only.
+const PERMANENT_ACTIVATION_EXPIRES_AT = 9223372036854775807;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PBKDF2_ITERATIONS = 100000;
 
@@ -186,7 +188,7 @@ async function adminCreateEnrollment(body, request, env) {
   // controlled only by status/used_at. The QR therefore remains valid until
   // the product is activated, even if it stays in inventory for months.
   await env.DB.prepare("INSERT INTO enrollment_tokens(device_id,token_hash,issued_at,expires_at,status) VALUES(?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET token_hash=excluded.token_hash,issued_at=excluded.issued_at,expires_at=excluded.expires_at,used_at=NULL,used_by_customer_id=NULL,status='issued'")
-    .bind(deviceId,hash,t,null,"issued").run();
+    .bind(deviceId,hash,t,PERMANENT_ACTIVATION_EXPIRES_AT,"issued").run();
   await writeAdminAudit(env,a.admin.id,deviceId,"product_activation_qr_generated",{persistent:true});
   return json({deviceId,token,persistent:true});
 }
@@ -335,7 +337,7 @@ async function claimEnrollment(body, request, env) {
   const deviceChanges = Number(result?.[0]?.meta?.changes || 0);
   const tokenChanges = Number(result?.[1]?.meta?.changes || 0);
   if (deviceChanges !== 1 || tokenChanges !== 1) {
-    return fail("Invalid, expired, already-used, or already-claimed enrollment token.", 409);
+    return fail("Invalid, already-used, or already-claimed activation QR.", 409);
   }
 
   await audit(env, customer.id, deviceId, "device_claimed", {
