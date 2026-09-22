@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "include": ["/api/*"],
+  "exclude": ["/v2/*", "/v3/*", "/Plant_Watering_Smart_V3.ino"]
+}
