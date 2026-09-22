@@ -3,6 +3,7 @@ import { onRequest } from "./functions/api/[[path]].js";
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === "/superadmin") return env.ASSETS.fetch(new Request(new URL("/qr.html", request.url), request));
     if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
       const pathText = url.pathname.slice("/api".length).replace(/^\/+|\/+$/g, "");
       const path = pathText ? pathText.split("/") : [];
