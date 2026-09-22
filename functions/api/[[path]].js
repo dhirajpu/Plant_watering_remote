@@ -217,6 +217,10 @@ async function adminCommand(body, request, env) {
   const deviceId=normalizeDeviceId(body.deviceId), action=String(body.action||"").trim();
   const allowed=["emergency_stop","resume","water_now","set_mode","clear_fault","calibrate_dry","calibrate_wet","set_config"];
   if(!DEVICE_RE.test(deviceId)||!allowed.includes(action))return fail("Unsupported device command.");
+  const supportId=String(body.supportSessionId||"");
+  if(!supportId)return fail("Start a Remote Support session before issuing commands.",403);
+  const support=await env.DB.prepare("SELECT id FROM support_sessions WHERE id=? AND device_id=? AND admin_id=? AND status='active' AND expires_at>? LIMIT 1").bind(supportId,deviceId,a.admin.id,now()).first();
+  if(!support)return fail("Remote Support session is missing or expired.",403);
   const device=await env.DB.prepare("SELECT device_id,disabled,owner_customer_id FROM devices WHERE device_id=?").bind(deviceId).first();
   if(!device)return fail("Device not found.",404);
   if(device.disabled)return fail("Device is disabled.",403);
