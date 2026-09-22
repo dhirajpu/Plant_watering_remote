@@ -25,7 +25,7 @@ static const char *FIREBASE_BASE_URL = "https://vernal-catfish-196407.firebaseio
 static const char *DEVICE_ROOT = "/plantMonitor/v2";
 static const char *FIREBASE_AUTH = "";
 static const char *OTA_PASSWORD = "";
-static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.3";
+static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.4_SECURITY";
 static const char *OTA_USER = "admin";
 // Change this before the first flash on a new controller. The value is only used to initialize the NVS hash.
 static const char *CONTROL_DEFAULT_PASSWORD = "CHANGE_ME_CONTROL_PASSWORD";
