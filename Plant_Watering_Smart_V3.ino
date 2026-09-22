@@ -23,6 +23,7 @@ static const char *WIFI_SSID = "";
 static const char *WIFI_PASSWORD = "";
 // Cloudflare Pages/Workers API. Replace with the final production Pages domain before flashing.
 static const char *CLOUD_API_BASE_URL = "https://REPLACE_WITH_CLOUDFLARE_PAGES_DOMAIN/api";
+// Cloud deployment version. Set this to the final production Pages URL before flashing.
 static const char *OTA_PASSWORD = "";
 static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V3_COMMERCIAL_1.0";
 static const char *OTA_USER = "admin";
@@ -522,8 +523,6 @@ void setupOTA(){
   },handleUpdateUpload);
   server.begin();
 }
-void connectWifi(){WiFi.mode(WIFI_STA);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);unsigned long start=millis();while(WiFi.status()!=WL_CONNECTED&&millis()-start<15000)delay(250);wifiConnected=WiFi.status()==WL_CONNECTED;deviceIp=wifiConnected?WiFi.localIP().toString():"offline";if(wifiConnected){configTime(19800,0,"pool.ntp.org","time.nist.gov");for(int i=0;i<20;i++){time_t now=time(nullptr);if(now>1700000000){timeSynced=true;break;}delay(100);}}}
-
 /* V3 commercial foundation: one firmware image can be flashed to many ESP32s.\n   Each device derives a stable product Device ID from the factory eFuse MAC,\n   stores Wi-Fi credentials in NVS, and exposes a local browser provisioning page\n   when no usable Wi-Fi is configured. The V2 controller logic remains unchanged.\n*/\nvoid setup(){
   Serial.begin(115200);bootMs=millis();initDeviceIdentity();for(int i=0;i<NUM_PLANTS;i++){pinMode(SENSOR_PINS[i],INPUT);pinMode(VALVE_PINS[i],OUTPUT);}pinMode(PUMP_PIN,OUTPUT);outputsOff();Wire.begin(SDA_PIN,SCL_PIN);lcd.init();lcd.backlight();lcd.clear();lcd.print("Plant Life Care");
   loadEmergency();loadRuntime();connectWifi();registerCloudDevice();initControlSecurity();setupProvisioningRoutes();loadOrMigratePlantConfig();systemReady=true;setupOTA();sampleSensors();publishSecurityMeta();publishStatus();
