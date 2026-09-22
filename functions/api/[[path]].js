@@ -102,7 +102,7 @@ async function adminLogin(body, env) {
     await env.DB.prepare("INSERT INTO super_admins(id,email,name,password_salt,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
       .bind(id,email,"Super Admin",salt,hash,t,t).run();
     row = await env.DB.prepare("SELECT * FROM super_admins WHERE id=?").bind(id).first();
-    await audit(env, id, null, "super_admin_bootstrapped", { email });
+    await writeAdminAudit(env, id, null, "super_admin_bootstrapped", { email });
   }
 
   if (!row || row.disabled) return fail("Incorrect email or password.", 401);
@@ -112,7 +112,7 @@ async function adminLogin(body, env) {
   const token = randomToken(), tokenHash = await sha256Hex(token), t = now();
   await env.DB.prepare("INSERT INTO super_admin_sessions(token_hash,admin_id,expires_at,created_at,last_seen_at) VALUES(?,?,?,?,?)")
     .bind(tokenHash,row.id,t+SUPER_ADMIN_SESSION_TTL_MS,t,t).run();
-  await audit(env, row.id, null, "super_admin_login", { email: row.email });
+  await writeAdminAudit(env, row.id, null, "super_admin_login", { email: row.email });
   return json({ token, expiresAt: t + SUPER_ADMIN_SESSION_TTL_MS, admin: { id: row.id, email: row.email, name: row.name } });
 }
 
