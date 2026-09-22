@@ -6,12 +6,15 @@
   const C=window.PLANT_V3_CONFIG;
   const AUTH_BASE='https://identitytoolkit.googleapis.com/v1/accounts:';
   const REFRESH_URL='https://securetoken.googleapis.com/v1/token';
+  const FUNCTIONS_BASE='https://asia-southeast1-vernal-catfish-196407.cloudfunctions.net/';
   const SESSION_KEY='plantV3CustomerSession';
   const state={session:null,loading:false};
 
   const el=id=>document.getElementById(id);
   const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-  const claimDevice=()=>new URLSearchParams(location.search).get('device')||'';
+  const query=new URLSearchParams(location.search);
+  const claimDevice=()=>query.get('device')||'';
+  const claimToken=()=>query.get('enroll')||'';
   const save=()=>localStorage.setItem(SESSION_KEY,JSON.stringify(state.session));
   const load=()=>{try{state.session=JSON.parse(localStorage.getItem(SESSION_KEY)||'null')}catch{state.session=null}};
   const clear=()=>{state.session=null;localStorage.removeItem(SESSION_KEY)};
@@ -62,20 +65,25 @@
     C.deviceRoot='/plantMonitor/v3/devices/'+deviceId;C.authToken=state.session.idToken;C.deviceId=deviceId;
     sessionStorage.setItem('plantV3DeviceId',deviceId);
   }
+  async function callFunction(name,data,requireAuth=true){
+    const headers={'Content-Type':'application/json'};
+    if(requireAuth&&state.session?.idToken)headers.Authorization='Bearer '+state.session.idToken;
+    const r=await fetch(FUNCTIONS_BASE+name,{method:'POST',headers,body:JSON.stringify({data})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||j.error)throw new Error(j?.error?.message||'Secure enrollment service failed.');
+    return j.data;
+  }
   async function getUserDevices(){return (await db('/plantMonitor/v3/users/'+state.session.localId+'/devices'))||{}}
-  async function claim(deviceId){
-    if(!/^PLANT-[A-Fa-f0-9]{6}$/.test(deviceId))throw new Error('Invalid Device ID.');
-    const ownerPath='/plantMonitor/v3/deviceOwners/'+deviceId;
-    const current=await db(ownerPath);
-    if(current&&current!==state.session.localId)throw new Error('This device is already claimed by another customer.');
-    if(!current)await db(ownerPath,'PUT',state.session.localId);
-    await db('/plantMonitor/v3/users/'+state.session.localId+'/devices/'+deviceId,'PUT',{deviceId,claimedAt:new Date().toISOString(),source:'qr'});
-    setDevice(deviceId);return deviceId;
+  async function claim(deviceId,token){
+    if(!/^ESPBOARD-[A-Fa-f0-9]{6}$/.test(deviceId))throw new Error('Invalid Device ID. Expected ESPBOARD-XXXXXX.');
+    if(!token)throw new Error('This QR does not contain a secure one-time enrollment token. Generate a new production QR.');
+    const result=await callFunction('claimEnrollmentToken',{deviceId,token},true);
+    setDevice(result.deviceId);return result.deviceId;
   }
 
   function authView(){
     const claim=claimDevice();el('customerApp').hidden=true;el('authShell').hidden=false;
-    el('claimHint').innerHTML=claim?'<strong>Device found:</strong> '+esc(claim)+'<br>Sign in or register to claim this controller.':'Sign in to access your Plant Life Care devices.';
+    el('claimHint').innerHTML=claim?'<strong>Device found:</strong> '+esc(claim)+'<br>Sign in or register to securely claim this controller.':'Sign in to access your Plant Life Care devices.';
     el('claimDevice').value=claim;
   }
   function appView(deviceId){
@@ -87,7 +95,7 @@
   async function continueToDevice(){
     showError('');showStatus('Checking device ownership…');
     const id=(el('claimDevice').value||'').trim().toUpperCase();if(!id)return showError('Enter or scan a Device ID first.');
-    try{const devices=await getUserDevices();if(devices[id])return appView(id);await claim(id);showStatus('Device claimed successfully.');appView(id)}
+    try{const devices=await getUserDevices();if(devices[id])return appView(id);await claim(id,claimToken());showStatus('Device claimed securely.');appView(id)}
     catch(e){showError(e.message||'Unable to claim device.')}
   }
   async function submit(mode){
@@ -103,7 +111,7 @@
       if(mode==='register')await db('/plantMonitor/v3/users/'+j.localId,'PATCH',{email:j.email,name,createdAt:new Date().toISOString()});
       else await db('/plantMonitor/v3/users/'+j.localId,'PATCH',{email:j.email,name});
       const id=claimDevice();const devices=await getUserDevices();
-      if(id&&!devices[id])await claim(id);
+      if(id&&!devices[id])await claim(id,claimToken());
       const chosen=id||(Object.keys(devices)[0]||null);
       if(!chosen)throw new Error('Account ready. Scan your device QR to connect your first controller.');
       appView(chosen);
@@ -120,7 +128,7 @@
     bind();if(!await ensureSession()){authView();return}
     const claim=claimDevice();
     try{const devices=await getUserDevices();const chosen=claim&&devices[claim]?claim:Object.keys(devices)[0];if(chosen){appView(chosen);return}
-      if(claim){el('authShell').hidden=false;el('customerApp').hidden=true;el('claimDevice').value=claim;el('claimHint').innerHTML='<strong>Device found:</strong> '+esc(claim)+'<br>Click Claim Device to add it to your account.';return}
+      if(claim){el('authShell').hidden=false;el('customerApp').hidden=true;el('claimDevice').value=claim;el('claimHint').innerHTML='<strong>Device found:</strong> '+esc(claim)+'<br>Sign in, then the one-time enrollment token will securely claim this controller.';return}
     }catch(e){clear();showError(e.message||'Unable to load your account.')}
     authView();
   }
