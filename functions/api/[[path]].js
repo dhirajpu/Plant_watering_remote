@@ -435,7 +435,16 @@ async function customerDevice(deviceId, subPath, request, env) {
     const field=path.split("/")[1]+"_json";await env.DB.prepare("INSERT INTO device_security(device_id,"+field+",updated_at) VALUES(?,?,?) ON CONFLICT(device_id) DO UPDATE SET "+field+"=excluded."+field+",updated_at=excluded.updated_at").bind(deviceId,JSON.stringify(body),now()).run();return json({ok:true});
   }
   const configMatch=path.match(/^config\/plants\/(\d+)$/);
-  if(configMatch&&method==="GET"){const r=await env.DB.prepare("SELECT config_json FROM device_configs WHERE device_id=? AND plant_index=?").bind(deviceId,Number(configMatch[1])).first();return json(parseJsonText(r?.config_json));}
+  if(configMatch){
+    const i=Number(configMatch[1]); if(i<0||i>4)return fail("Invalid plant index.");
+    if(method==="GET"){const r=await env.DB.prepare("SELECT config_json FROM device_configs WHERE device_id=? AND plant_index=?").bind(deviceId,i).first();return json(parseJsonText(r?.config_json));}
+    if(method==="PUT"){
+      const body=await request.json().catch(()=>({}));
+      await env.DB.prepare("INSERT INTO device_configs(device_id,plant_index,config_json,updated_at) VALUES(?,?,?,?) ON CONFLICT(device_id,plant_index) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at").bind(deviceId,i,JSON.stringify(body||{}),now()).run();
+      await audit(env,null,deviceId,"customer_plant_setup_saved",{plantIndex:i});
+      return json({ok:true});
+    }
+  }
   if(path==="commandAck"&&method==="GET"){const r=await env.DB.prepare("SELECT ack_json FROM device_commands WHERE device_id=?").bind(deviceId).first();return json(parseJsonText(r?.ack_json));}
   return fail("Not found.",404);
 }
