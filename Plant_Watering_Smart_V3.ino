@@ -144,7 +144,7 @@ String randomHex(size_t bytes);\nString macHex(){
 void initDeviceIdentity(){
   String suffix=macHex();
   suffix=suffix.substring(max(0,(int)suffix.length()-6));
-  deviceId="PLANT-"+suffix;
+  deviceId="ESPBOARD-"+suffix;
   prefs.begin("device",false);
   deviceSecret=prefs.getString("secret","");
   if(deviceSecret.length()<32){
