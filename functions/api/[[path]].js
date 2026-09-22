@@ -64,6 +64,9 @@ async function audit(env, customerId, deviceId, action, details = {}) {
     .bind(customerId || null, deviceId || null, action, JSON.stringify(details), now()).run();
 }
 function parseJsonText(text, fallback = {}) { try { return text ? JSON.parse(text) : fallback; } catch { return fallback; } }
+async function adminAudit(env, adminId, deviceId, action, details = {}) {
+  return audit(env, null, deviceId, action, { ...details, adminId });
+}
 
 const SUPER_ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const SUPPORT_SESSION_TTL_MS = 30 * 60 * 1000;
@@ -157,7 +160,7 @@ async function adminRegisterDevice(body, request, env) {
   if(existing && existing.device_secret_hash!==hash)return fail("Device already exists with a different secret.",409);
   if(!existing)await env.DB.prepare("INSERT INTO devices(device_id,device_secret_hash,created_at,updated_at,last_seen_at) VALUES(?,?,?,?,?)").bind(deviceId,hash,t,t,t).run();
   else await env.DB.prepare("UPDATE devices SET updated_at=? WHERE device_id=?").bind(t,deviceId).run();
-  await audit(env,a.admin.id,deviceId,"admin_device_registered",{source:"superadmin"});
+  await adminAudit(env,a.admin.id,deviceId,"admin_device_registered",{source:"superadmin"});
   return json({ok:true,deviceId,created:!existing},existing?200:201);
 }
 
@@ -172,7 +175,7 @@ async function adminCreateEnrollment(body, request, env) {
   const token=randomToken(32),t=now(),hash=await sha256Hex(token);
   await env.DB.prepare("INSERT INTO enrollment_tokens(device_id,token_hash,issued_at,expires_at,status) VALUES(?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET token_hash=excluded.token_hash,issued_at=excluded.issued_at,expires_at=excluded.expires_at,used_at=NULL,used_by_customer_id=NULL,status='issued'")
     .bind(deviceId,hash,t,t+TOKEN_TTL_MS,"issued").run();
-  await audit(env,a.admin.id,deviceId,"enrollment_qr_generated",{expiresAt:t+TOKEN_TTL_MS});
+  await adminAudit(env,a.admin.id,deviceId,"enrollment_qr_generated",{expiresAt:t+TOKEN_TTL_MS});
   return json({deviceId,token,expiresAt:t+TOKEN_TTL_MS,expiresInSeconds:TOKEN_TTL_MS/1000});
 }
 
@@ -185,12 +188,12 @@ async function adminSetDevice(body, request, env) {
   const t=now();
   if(body.disabled!==undefined){
     await env.DB.prepare("UPDATE devices SET disabled=?,updated_at=? WHERE device_id=?").bind(body.disabled?1:0,t,deviceId).run();
-    await audit(env,a.admin.id,deviceId,body.disabled?"device_disabled":"device_enabled",{});
+    await adminAudit(env,a.admin.id,deviceId,body.disabled?"device_disabled":"device_enabled",{});
   }
   if(body.maintenanceExpiresAt!==undefined){
     const v=body.maintenanceExpiresAt===null?null:Number(body.maintenanceExpiresAt);
     await env.DB.prepare("UPDATE devices SET maintenance_expires_at=?,updated_at=? WHERE device_id=?").bind(v,t,deviceId).run();
-    await audit(env,a.admin.id,deviceId,"maintenance_updated",{maintenanceExpiresAt:v});
+    await adminAudit(env,a.admin.id,deviceId,"maintenance_updated",{maintenanceExpiresAt:v});
   }
   return json({ok:true});
 }
@@ -205,7 +208,7 @@ async function adminAssignOwner(body, request, env) {
   if(email)customer=await env.DB.prepare("SELECT id,email,name FROM customers WHERE email=? AND disabled=0 LIMIT 1").bind(email).first();
   if(email&&!customer)return fail("Customer not found or disabled.",404);
   await env.DB.prepare("UPDATE devices SET owner_customer_id=?,updated_at=? WHERE device_id=?").bind(customer?.id||null,now(),deviceId).run();
-  await audit(env,a.admin.id,deviceId,customer?"device_owner_assigned":"device_owner_removed",{customerId:customer?.id||null,email:customer?.email||null});
+  await adminAudit(env,a.admin.id,deviceId,customer?"device_owner_assigned":"device_owner_removed",{customerId:customer?.id||null,email:customer?.email||null});
   return json({ok:true,owner:customer||null});
 }
 
@@ -217,11 +220,11 @@ async function adminCommand(body, request, env) {
   const device=await env.DB.prepare("SELECT device_id,disabled,owner_customer_id FROM devices WHERE device_id=?").bind(deviceId).first();
   if(!device)return fail("Device not found.",404);
   if(device.disabled)return fail("Device is disabled.",403);
-  const id=commandId?commandId():randomToken(16), t=now();
+  const id=randomToken(16), t=now();
   const command={id,action,...body.extra,issuedAtEpochSec:Math.floor(t/1000),source:"superadmin",adminId:a.admin.id};
   await env.DB.prepare("INSERT INTO device_commands(device_id,command_json,updated_at) VALUES(?,?,?) ON CONFLICT(device_id) DO UPDATE SET command_json=excluded.command_json,updated_at=excluded.updated_at")
     .bind(deviceId,JSON.stringify(command),t).run();
-  await audit(env,a.admin.id,deviceId,"support_command_issued",{action,commandId:id});
+  await adminAudit(env,a.admin.id,deviceId,"support_command_issued",{action,commandId:id});
   return json({ok:true,id});
 }
 
@@ -233,7 +236,7 @@ async function adminStartSupport(body, request, env) {
   if(device.disabled)return fail("Device is disabled.",403);
   const id=crypto.randomUUID(),t=now(),expires=t+SUPPORT_SESSION_TTL_MS;
   await env.DB.prepare("INSERT INTO support_sessions(id,device_id,admin_id,expires_at,status,created_at) VALUES(?,?,?,?,?,?)").bind(id,deviceId,a.admin.id,expires,"active",t).run();
-  await audit(env,a.admin.id,deviceId,"support_session_started",{supportSessionId:id,expiresAt:expires});
+  await adminAudit(env,a.admin.id,deviceId,"support_session_started",{supportSessionId:id,expiresAt:expires});
   return json({id,deviceId,expiresAt:expires});
 }
 
@@ -241,7 +244,7 @@ async function adminEndSupport(body, request, env) {
   const a=await superAdminRequired(request,env); if(a.error)return a.error;
   const id=String(body.id||""); if(!id)return fail("Support session id required.");
   await env.DB.prepare("UPDATE support_sessions SET status='ended',ended_at=? WHERE id=? AND admin_id=? AND status='active'").bind(now(),id,a.admin.id).run();
-  await audit(env,a.admin.id,null,"support_session_ended",{supportSessionId:id});
+  await adminAudit(env,a.admin.id,null,"support_session_ended",{supportSessionId:id});
   return json({ok:true});
 }
 
