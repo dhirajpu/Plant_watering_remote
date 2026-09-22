@@ -1,39 +1,5 @@
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Plant Life Care V3 - Secure Device QR</title><link rel="stylesheet" href="./styles.css"><script src="./config.js"></script></head>
-<body><main class="page"><section class="auth-shell"><div class="auth-card">
-<p class="eyebrow">Plant Life Care V3</p><h1>Secure Device QR</h1>
-<p class="subtitle">Generate a short-lived, one-time enrollment QR for a physical ESPBOARD controller.</p>
-<label>Device ID<input id="deviceId" placeholder="ESPBOARD-A1B2C3" autocomplete="off"></label>
-<label>Factory enrollment key<input id="adminKey" type="password" autocomplete="off"></label>
-<button id="make">Generate Secure QR</button>
-<div id="result" class="qr-result" hidden><h2 id="qrTitle"></h2><div id="qr"></div>
-<p><strong>QR validity:</strong> 15 minutes or until claimed.</p><p id="qrUrl"></p><button onclick="window.print()">Print QR</button></div>
-<p class="auth-error">The QR contains a one-time enrollment token, not the permanent device credential. Never publish the factory enrollment key.</p>
-<p class="muted">After the customer scans the QR, the token is consumed by the secure backend when the customer claims the device.</p>
-</div></section></main>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script>
-const FUNCTIONS_BASE=(window.PLANT_V3_CONFIG.functionsBaseUrl||'').replace(/\/$/,'')+'/';
-document.getElementById('make').onclick=async()=>{
-  const id=document.getElementById('deviceId').value.trim().toUpperCase();
-  const key=document.getElementById('adminKey').value;
-  if(!/^ESPBOARD-[A-F0-9]{6}$/.test(id)){alert('Use a Device ID such as ESPBOARD-A1B2C3.');return}
-  if(!key){alert('Enter the factory enrollment key.');return}
-  const b=document.getElementById('make');b.disabled=true;b.textContent='Generating secure QR...';
-  try{
-    const r=await fetch(FUNCTIONS_BASE+'createEnrollmentToken',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{deviceId:id,adminKey:key}})});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok||j.error)throw new Error(j?.error?.message||'Unable to create enrollment token.');
-    const token=j.data.token;
-    const target=new URL('./index.html?device='+encodeURIComponent(id)+'&enroll='+encodeURIComponent(token),location.href).href;
-    document.getElementById('qr').innerHTML='';
-    new QRCode(document.getElementById('qr'),{text:target,width:260,height:260});
-    document.getElementById('qrTitle').textContent=id;
-    document.getElementById('qrUrl').textContent='Secure enrollment link generated. Do not share the URL/token separately.';
-    document.getElementById('result').hidden=false;
-  }catch(e){alert(e.message||'Unable to generate secure QR.')}
-  finally{b.disabled=false;b.textContent='Generate Secure QR'}
-};
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Plant Life Care - Secure Device QR</title><link rel="stylesheet" href="./styles.css"></head><body><main class="page"><section class="auth-shell"><div class="auth-card"><p class="eyebrow">Plant Life Care V3</p><h1>Secure Device QR</h1><p class="subtitle">Factory tool. Generates a 15-minute, one-time enrollment QR.</p><label>Device ID<input id="deviceId" placeholder="ESPBOARD-A1B2C3"></label><label>Factory enrollment key<input id="factoryKey" type="password"></label><button id="generate">Generate Secure QR</button><p id="status" class="auth-status"></p><p id="error" class="auth-error"></p><div id="result" hidden><h2>Scan / Print</h2><div id="qrcode"></div><p id="details"></p><button id="print" class="secondary">Print QR</button></div></div></section></main><script>
+const $=id=>document.getElementById(id);
+$("generate").onclick=async()=>{ $("error").textContent="";$("status").textContent="Generating one-time token…";$("result").hidden=true; const deviceId=$("deviceId").value.trim().toUpperCase(),factoryKey=$("factoryKey").value; try{const r=await fetch("/api/enrollment/create",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({deviceId,factoryKey})}),j=await r.json();if(!r.ok)throw new Error(j.error||"Unable to generate enrollment token.");const url=new URL("./index.html",location.href);url.searchParams.set("device",deviceId);url.searchParams.set("enroll",j.token);$("qrcode").innerHTML="";const img=document.createElement("img");img.alt="Secure Plant Life Care device QR";img.width=280;img.height=280;img.src="https://api.qrserver.com/v1/create-qr-code/?size=280x280&data="+encodeURIComponent(url.href);$("qrcode").appendChild(img);$("details").textContent="Device "+deviceId+" • One-time token valid for 15 minutes or until claimed.";$("status").textContent="QR generated.";$("result").hidden=false}catch(e){$("error").textContent=e.message;$("status").textContent=""}};
+$("print").onclick=()=>window.print();
 </script></body></html>
