@@ -62,9 +62,10 @@ function addSecurityButtons(){
   }
 }
 let lastStatus=null;let settingsEditing=false;let lastLiveAt=0;const DEVICE_STALE_SEC=15;let telemetry=[];let wateringHistory=[];let commandBusy=false;let commandTimer=null;let commandButtons=[];
-function url(path){let u=`${CFG.firebaseBaseUrl}${CFG.deviceRoot}${path}.json`;if(CFG.authToken)u+=`?auth=${encodeURIComponent(CFG.authToken)}`;return u}
-async function get(path){const r=await fetch(url(path),{cache:'no-store'});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}
-async function put(path,data){const r=await fetch(url(path),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}
+function url(path){const id=CFG.deviceId||sessionStorage.getItem('plantV3DeviceId')||'';return CFG.apiBaseUrl+'/device/'+encodeURIComponent(id)+path}
+function customerHeaders(){const token=CFG.customerToken||'';return token?{Authorization:'Bearer '+token}:{}}
+async function get(path){const r=await fetch(url(path),{cache:'no-store',headers:customerHeaders()});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}
+async function put(path,data){const r=await fetch(url(path),{method:'PUT',headers:{'Content-Type':'application/json',...customerHeaders()},body:JSON.stringify(data)});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}
 function esc(v){return String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]) )}
 function fmtMin(v){const n=Number(v||0);return n<60?`${n} min`:`${Math.floor(n/60)}h ${n%60}m`}
 function fmtHistoryDate(v){if(!v)return '';const d=new Date(v);return Number.isNaN(d.getTime())?'':d.toLocaleString(undefined,{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
