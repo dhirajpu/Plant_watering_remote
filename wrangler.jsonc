@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "plant-life-care-v3",
+  "name": "plant-watering-remote",
   "main": "./worker.js",
   "compatibility_date": "2026-09-22",
   "assets": {
