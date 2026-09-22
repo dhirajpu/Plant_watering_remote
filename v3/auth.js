@@ -18,7 +18,7 @@
     const wrap=el("plantSetupList"); wrap.innerHTML="";
     for(let i=0;i<count;i++) wrap.insertAdjacentHTML("beforeend",`<div class="setup-plant"><h3>Sensor ${i+1}</h3><label>Plant name<input id="setupName-${i}" placeholder="Plant ${i+1}" autocomplete="off"></label><label>Moisture percentage (%)<input id="setupMoisture-${i}" type="number" min="1" max="100" inputmode="decimal" placeholder="e.g. 50"></label></div>`);
   }
-  async function saveSetup(id,count){
+  async function saveSetup(id,count,valveCount){
     for(let i=0;i<count;i++){
       const name=(el(`setupName-${i}`).value||`Plant ${i+1}`).trim();
       const target=Number(el(`setupMoisture-${i}`).value);
@@ -28,11 +28,11 @@
       if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||`Could not save Sensor ${i+1}.`);
     }
     localStorage.setItem(setupKey(id),"1");
-    localStorage.setItem(setupDataKey(id),JSON.stringify({count}));
+    localStorage.setItem(setupDataKey(id),JSON.stringify({sensorCount:count,valveCount}));
   }
-  async function completeSetup(id,count){
+  async function completeSetup(id,count,valveCount){
     el("setupStatus").textContent="Saving plant setup…"; el("setupError").hidden=true; el("finishSetupBtn").disabled=true;
-    try{await saveSetup(id,count); appView(id)}catch(e){el("setupError").textContent=e.message;el("setupError").hidden=false;el("setupStatus").textContent=""}finally{el("finishSetupBtn").disabled=false}
+    try{await saveSetup(id,count,valveCount); appView(id)}catch(e){el("setupError").textContent=e.message;el("setupError").hidden=false;el("setupStatus").textContent=""}finally{el("finishSetupBtn").disabled=false}
   }
   function bindSetup(){
     el("sensorNextBtn").onclick=()=>{
@@ -41,7 +41,7 @@
       el("setupError").hidden=true;renderPlantSetup(n);el("sensorStep").hidden=true;el("plantStep").hidden=false;
     };
     el("plantBackBtn").onclick=()=>{el("plantStep").hidden=true;el("sensorStep").hidden=false};
-    el("finishSetupBtn").onclick=()=>{const n=Number(el("sensorCount").value);completeSetup(C.deviceId,n)};
+    el("finishSetupBtn").onclick=()=>{const n=Number(el("sensorCount").value),v=Number(el("valveCount").value);completeSetup(C.deviceId,n,v)};
   }
   const showError=msg=>{const e=el("authError");if(e){e.textContent=msg||"";e.hidden=!msg}}, showStatus=msg=>{const e=el("authStatus");if(e)e.textContent=msg||""};
   async function request(path,body,method="POST"){const r=await api(path,{method,body:body===undefined?undefined:JSON.stringify(body)}),j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||"Request failed.");return j}
