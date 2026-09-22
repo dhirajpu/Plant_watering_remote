@@ -196,7 +196,7 @@ String sha256Hex(const String &input){
   mbedtls_sha256_ret((const unsigned char*)input.c_str(), input.length(), digest, 0);
   char hex[65];
   for(int i=0;i<32;i++)sprintf(hex+(i*2),"%02x",digest[i]);
-  hex[64]='\\0';
+  hex[64]='\0';
   return String(hex);
 }
 String randomHex(size_t bytes){
@@ -253,7 +253,7 @@ void handleSecurity(){
 
 void handleCommand(){
   String b;if(!httpGet("/command",b)||b.length()<2||b=="null")return;String id=jsonValue(b,"id");if(!id.length()||id==lastCommandId)return;String action=jsonValue(b,"action");String authToken=jsonValue(b,"authToken");int p=(int)jsonLong(b,"plantIndex",-1);
-  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet";
+  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet"||action=="change_password";
   long issuedSec=jsonLong(b,"issuedAtEpochSec",0);
   if(issuedSec<=0){long legacyMs=jsonLong(b,"issuedAtEpochMs",0);if(legacyMs>0)issuedSec=legacyMs/1000L;}
   bool valid=true;
@@ -267,6 +267,7 @@ void handleCommand(){
   else if(action=="clear_fault"&&p>=0&&p<NUM_PLANTS){states[p].waterResponseFault=false;if(states[p].sensorFault&&states[p].raw>=SENSOR_MIN_VALID&&states[p].raw<=SENSOR_MAX_VALID)states[p].sensorFault=false;if(!states[p].sensorFault){clearFaultReason(p);states[p].lastStopReason=STOP_NONE;}result="fault_cleared";}
   else if(action=="calibrate_dry"&&p>=0&&p<NUM_PLANTS){plants[p].airRaw=states[p].raw;result="dry_recorded";}
   else if(action=="calibrate_wet"&&p>=0&&p<NUM_PLANTS){plants[p].wetRaw=states[p].raw;result="wet_recorded";}
+  else if(action=="change_password"){String newSalt=jsonValue(b,"newSalt"),newHash=jsonValue(b,"newHash");if(newSalt.length()>=16&&newSalt.length()<=64&&newHash.length()==64){prefs.begin("security",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();controlSalt=newSalt;controlPasswordHash=newHash;controlSessionToken=randomHex(32);controlSessionExpiresMs=millis()+CONTROL_SESSION_MS;result="password_changed";}else result="invalid_password_data";}
   if(action=="water_now"&&p>=0&&p<NUM_PLANTS&&result=="queued")startSession(p,true,states[p].manualRequestedMs);
   String ack="{\"id\":\""+safetyName(id)+"\",\"action\":\""+safetyName(action)+"\",\"result\":\""+safetyName(result)+"\",\"handledAtMs\":"+String(millis())+"}";httpPut("/commandAck",ack);lastCommandId=id;
 }
