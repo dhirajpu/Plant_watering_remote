@@ -9,6 +9,7 @@
 #include <ArduinoOTA.h>
 #include <time.h>
 #include <esp_system.h>
+#include "mbedtls/sha256.h"
 
 /*
   Plant Watering Smart V2 - OTA
@@ -26,6 +27,11 @@ static const char *FIREBASE_AUTH = "";
 static const char *OTA_PASSWORD = "";
 static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.3";
 static const char *OTA_USER = "admin";
+// Change this before the first flash on a new controller. The value is only used to initialize the NVS hash.
+static const char *CONTROL_DEFAULT_PASSWORD = "CHANGE_ME_CONTROL_PASSWORD";
+static const unsigned long CONTROL_SESSION_MS = 5UL*60UL*1000UL;
+static const unsigned long CONTROL_CHALLENGE_MS = 60UL*1000UL;
+static const unsigned long SECURITY_POLL_MS = 1000UL;
 
 static const int NUM_PLANTS = 5;
 static const int SENSOR_PINS[NUM_PLANTS] = {34,35,32,33,39};
@@ -107,6 +113,8 @@ bool wifiConnected=false, systemReady=false, emergencyStop=false, otaInProgress=
 int activePlant=-1, displayPlant=0;
 unsigned long bootMs=0,lastSensorMs=0,lastLcdMs=0,lastRotateMs=0,lastStatusMs=0,lastCommandMs=0,lastConfigMs=0,lastTelemetryMs=0,lastWifiRetryMs=0;
 String deviceIp="offline",lastCommandId="",lastConfigVersion="";
+String controlPasswordHash="",controlSalt="",authChallenge="",authChallengeId="",controlSessionToken="";
+unsigned long authChallengeExpiresMs=0,controlSessionExpiresMs=0,lastSecurityMs=0,lastSecurityRequestMs=0;
 
 String boolJson(bool v){return v?"true":"false";}
 String modeText(PlantMode m){if(m==MODE_MANUAL)return "MANUAL";if(m==MODE_DISABLED)return "DISABLED";return "AUTO";}
@@ -183,14 +191,76 @@ void evaluateWatering(){
 
 void updateConfig(){for(int i=0;i<NUM_PLANTS;i++){String b;if(!httpGet(String("/config/plants/")+i,b)||!b.length()||b=="null")continue;String n=jsonValue(b,"name");if(n.length())plants[i].name=n;plants[i].targetLow=constrain((int)jsonLong(b,"targetLow",plants[i].targetLow),0,95);plants[i].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[i].targetHigh),plants[i].targetLow+1,100);plants[i].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[i].burstMs),1000UL,plants[i].maxBurstMs);plants[i].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[i].soakMs/1000UL),10UL,1800UL)*1000UL;plants[i].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[i].minIntervalMs/60000UL),1UL,1440UL)*60000UL;String m=jsonValue(b,"mode");if(m.length())plants[i].mode=parseMode(m);}}
 
+String sha256Hex(const String &input){
+  uint8_t digest[32];
+  mbedtls_sha256_ret((const unsigned char*)input.c_str(), input.length(), digest, 0);
+  char hex[65];
+  for(int i=0;i<32;i++)sprintf(hex+(i*2),"%02x",digest[i]);
+  hex[64]='\\0';
+  return String(hex);
+}
+String randomHex(size_t bytes){
+  String out;
+  uint8_t buf[32];
+  if(bytes>sizeof(buf))bytes=sizeof(buf);
+  esp_fill_random(buf,bytes);
+  char hex[3];
+  for(size_t i=0;i<bytes;i++){sprintf(hex,"%02x",buf[i]);out+=hex;}
+  return out;
+}
+bool constantTimeEqual(const String &a,const String &b){
+  if(a.length()!=b.length())return false;
+  uint8_t diff=0;
+  for(size_t i=0;i<a.length();i++)diff|=(uint8_t)(a[i]^b[i]);
+  return diff==0;
+}
+void initControlSecurity(){
+  prefs.begin("security",false);
+  controlSalt=prefs.getString("salt","");
+  controlPasswordHash=prefs.getString("passHash","");
+  if(!controlSalt.length()){controlSalt=randomHex(16);prefs.putString("salt",controlSalt);}
+  if(controlPasswordHash.length()!=64){controlPasswordHash=sha256Hex(String(CONTROL_DEFAULT_PASSWORD)+controlSalt);prefs.putString("passHash",controlPasswordHash);}
+  prefs.end();
+  controlSessionToken="";controlSessionExpiresMs=0;authChallenge="";authChallengeId="";authChallengeExpiresMs=0;
+}
+bool controlSessionValid(const String &token){
+  return token.length()>0 && constantTimeEqual(token,controlSessionToken) && (long)(millis()-controlSessionExpiresMs)<0;
+}
+void publishSecurityMeta(){
+  if(!wifiConnected)return;
+  String meta="{\"enabled\":true,\"algorithm\":\"SHA-256(password+salt) + SHA-256(hash+serverNonce+clientNonce)\",\"salt\":\""+controlSalt+"\",\"sessionSec\":"+String(CONTROL_SESSION_MS/1000UL)+"}";
+  httpPut("/security/meta",meta);
+}
+void handleSecurity(){
+  if(!wifiConnected)return;
+  String req;
+  if(!httpGet("/security/request",req)||req.length()<2||req=="null")return;
+  String id=jsonValue(req,"id"),clientNonce=jsonValue(req,"clientNonce"),proof=jsonValue(req,"proof");
+  if(!id.length()||!clientNonce.length())return;
+  if(id!=authChallengeId && proof.length()==0){
+    authChallengeId=id;authChallenge=randomHex(24);authChallengeExpiresMs=millis()+CONTROL_CHALLENGE_MS;
+    String challenge="{\"id\":\""+safetyName(id)+"\",\"serverNonce\":\""+authChallenge+"\",\"expiresAtMs\":"+String(authChallengeExpiresMs)+"}";
+    httpPut("/security/challenge",challenge);return;
+  }
+  if(id!=authChallengeId||!proof.length()||millis()>=authChallengeExpiresMs)return;
+  String expected=sha256Hex(controlPasswordHash+authChallenge+clientNonce);bool ok=constantTimeEqual(proof,expected);
+  String response="{\"id\":\""+safetyName(id)+"\",\"ok\":"+boolJson(ok);
+  if(ok){controlSessionToken=randomHex(32);controlSessionExpiresMs=millis()+CONTROL_SESSION_MS;response+=",\"token\":\""+controlSessionToken+"\",\"expiresAtMs\":"+String(controlSessionExpiresMs);}
+  else response+=",\"error\":\"Invalid password\"";
+  response+="}";httpPut("/security/response",response);
+  authChallenge="";authChallengeId="";authChallengeExpiresMs=0;
+}
+
 void handleCommand(){
-  String b;if(!httpGet("/command",b)||b.length()<2||b=="null")return;String id=jsonValue(b,"id");if(!id.length()||id==lastCommandId)return;String action=jsonValue(b,"action");int p=(int)jsonLong(b,"plantIndex",-1);
+  String b;if(!httpGet("/command",b)||b.length()<2||b=="null")return;String id=jsonValue(b,"id");if(!id.length()||id==lastCommandId)return;String action=jsonValue(b,"action");String authToken=jsonValue(b,"authToken");int p=(int)jsonLong(b,"plantIndex",-1);
+  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet";
   long issuedSec=jsonLong(b,"issuedAtEpochSec",0);
   if(issuedSec<=0){long legacyMs=jsonLong(b,"issuedAtEpochMs",0);if(legacyMs>0)issuedSec=legacyMs/1000L;}
   bool valid=true;
   if(action!="emergency_stop"&&timeSynced&&issuedSec>0){long nowSec=(long)time(nullptr);long ageSec=nowSec-issuedSec;if(ageSec<-(long)(REMOTE_COMMAND_FUTURE_SKEW_MS/1000UL)||ageSec>(long)(REMOTE_COMMAND_MAX_AGE_MS/1000UL))valid=false;}
   String result="ignored";
-  if(!valid)result="expired";else if(action=="emergency_stop"){emergencyStop=true;outputsOff();if(activePlant>=0)states[activePlant].lastStopReason=STOP_EMERGENCY;activePlant=-1;saveEmergency();result="stopped";}
+  if(protectedAction&&!controlSessionValid(authToken))result="unauthorized";
+  else if(!valid)result="expired";else if(action=="emergency_stop"){emergencyStop=true;outputsOff();if(activePlant>=0)states[activePlant].lastStopReason=STOP_EMERGENCY;activePlant=-1;saveEmergency();result="stopped";}
   else if(action=="resume"){emergencyStop=false;outputsOff();saveEmergency();result="resumed";}
   else if(action=="set_mode"&&p>=0&&p<NUM_PLANTS){plants[p].mode=parseMode(jsonValue(b,"mode"));result="mode_set";}
   else if(action=="water_now"&&p>=0&&p<NUM_PLANTS&&!emergencyStop){unsigned long sec=constrain((unsigned long)jsonLong(b,"durationSec",5),1UL,plants[p].maxSessionMs/1000UL);states[p].manualRequest=true;states[p].manualRequestedMs=sec*1000UL;result=canStartPlant(p,true)?"queued":"blocked_by_safety";}
@@ -252,7 +322,7 @@ void connectWifi(){WiFi.mode(WIFI_STA);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);unsig
 
 void setup(){
   Serial.begin(115200);bootMs=millis();for(int i=0;i<NUM_PLANTS;i++){pinMode(SENSOR_PINS[i],INPUT);pinMode(VALVE_PINS[i],OUTPUT);}pinMode(PUMP_PIN,OUTPUT);outputsOff();Wire.begin(SDA_PIN,SCL_PIN);lcd.init();lcd.backlight();lcd.clear();lcd.print("Plant Life Care");
-  loadEmergency();loadRuntime();connectWifi();systemReady=true;setupOTA();sampleSensors();publishStatus();
+  loadEmergency();loadRuntime();connectWifi();initControlSecurity();systemReady=true;setupOTA();sampleSensors();publishSecurityMeta();publishStatus();
 }
 void loop(){
   ArduinoOTA.handle();server.handleClient();refreshRuntimeWindows();
@@ -261,6 +331,8 @@ void loop(){
   if(millis()-lastSensorMs>=SENSOR_SAMPLE_MS)sampleSensors();
   if(millis()-lastConfigMs>=CONFIG_MS){lastConfigMs=millis();updateConfig();}
   if(millis()-lastCommandMs>=COMMAND_MS){lastCommandMs=millis();handleCommand();}
+  if(millis()-lastSecurityMs>=SECURITY_POLL_MS){lastSecurityMs=millis();handleSecurity();}
+  if(millis()-lastSecurityRequestMs>=15000UL){lastSecurityRequestMs=millis();publishSecurityMeta();}
   if(activePlant<0){for(int i=0;i<NUM_PLANTS;i++){if(states[i].manualRequest&&canStartPlant(i,true)){startSession(i,true,states[i].manualRequestedMs);break;}if(plants[i].mode==MODE_AUTO&&canStartPlant(i,false)&&states[i].moisture<=plants[i].targetLow){startSession(i,false,0);break;}}}
   evaluateWatering();
   if(millis()-lastStatusMs>=STATUS_MS)publishStatus();
