@@ -2,7 +2,7 @@
   const C=window.PLANT_V3_CONFIG, SESSION_KEY="plantV3CustomerSession", state={session:null,loading:false};
   const el=id=>document.getElementById(id);
   const esc=v=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[c]));
-  const query=new URLSearchParams(location.search), claimDevice=()=>query.get("device")||"", claimToken=()=>query.get("enroll")||"";
+  const query=new URLSearchParams(location.hash.replace(/^#/,"")), claimDevice=()=>query.get("device")||"", claimToken=()=>query.get("enroll")||"";
   const save=()=>localStorage.setItem(SESSION_KEY,JSON.stringify(state.session));
   const load=()=>{try{state.session=JSON.parse(localStorage.getItem(SESSION_KEY)||"null")}catch{state.session=null}};
   const clear=()=>{state.session=null;localStorage.removeItem(SESSION_KEY)};
