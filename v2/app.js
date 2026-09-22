@@ -32,7 +32,36 @@ async function requireControlAuth(reason='Protected action'){
   finally{securityBusy=false}
 }
 function scheduleSecurityExpiry(){setInterval(()=>{if(controlSessionToken&&Date.now()>=controlSessionExpires)lockControls()},1000)}
-window.lockControls=lockControls;let lastStatus=null;let settingsEditing=false;let lastLiveAt=0;const DEVICE_STALE_SEC=15;let telemetry=[];let wateringHistory=[];let commandBusy=false;let commandTimer=null;let commandButtons=[];
+window.lockControls=lockControls;
+async function changeControlPassword(){
+  if(!(await requireControlAuth('Change Control Password')))return;
+  const next=prompt('Enter the new control password (8+ characters):');
+  if(next===null)return;
+  if(next.length<8){toast('Use at least 8 characters.');return}
+  const confirmPassword=prompt('Confirm the new control password:');
+  if(confirmPassword!==next){toast('Passwords do not match.');return}
+  try{
+    const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+    const newSalt=Array.from(bytes).map(b=>b.toString(16).padStart(2,'0')).join('');
+    const newHash=await sha256Text(next+newSalt);
+    const id=await sendCommand('change_password',{newSalt,newHash},'Change Password');
+    if(id)finishCommand('Control password changed successfully.');
+  }catch(e){finishCommand('Failed: '+e.message)}
+}
+function addSecurityButtons(){
+  const hero=document.querySelector('.hero-actions');
+  if(hero&&!document.getElementById('lockControlsBtn')){
+    const b=document.createElement('button');b.id='lockControlsBtn';b.className='secondary';b.textContent='🔒 Lock Controls';b.onclick=lockControls;hero.appendChild(b);
+  }
+  const panel=document.getElementById('diagnosticsView');
+  if(panel&&!document.getElementById('securityPanel')){
+    const section=document.createElement('section');section.className='section';section.id='securityPanel';
+    section.innerHTML='<div class="section-head"><div><h2>Control Security</h2><p>Monitoring remains view-only. Control changes require authentication and automatically lock after 5 minutes.</p></div><div class="actions"><button class="secondary" id="changePasswordBtn">Change Control Password</button></div></div>';
+    panel.appendChild(section);
+    document.getElementById('changePasswordBtn').onclick=changeControlPassword;
+  }
+}
+let lastStatus=null;let settingsEditing=false;let lastLiveAt=0;const DEVICE_STALE_SEC=15;let telemetry=[];let wateringHistory=[];let commandBusy=false;let commandTimer=null;let commandButtons=[];
 function url(path){let u=`${CFG.firebaseBaseUrl}${CFG.deviceRoot}${path}.json`;if(CFG.authToken)u+=`?auth=${encodeURIComponent(CFG.authToken)}`;return u}
 async function get(path){const r=await fetch(url(path),{cache:'no-store'});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}
 async function put(path,data){const r=await fetch(url(path),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()}
@@ -72,4 +101,4 @@ async function switchView(id){if(id==='diagnosticsView'&&!(await requireControlA
 document.querySelectorAll('.menu-btn').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
 async function refresh(){if(settingsEditing)return;try{const s=await get('/status');if(!s)throw new Error('No V2 status yet');renderStatus(s)}catch(e){if(Date.now()-lastLiveAt>(CFG.staleTimeoutSec*1000))renderOffline()}}
 document.getElementById('emergencyBtn').onclick=async()=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(confirm('Stop pump and close all valves?'))try{await sendCommand('emergency_stop',{},'Emergency Stop')}catch(e){}};document.getElementById('resumeBtn').onclick=async()=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(confirm('Resume automatic watering?'))try{await sendCommand('resume',{},'Resume')}catch(e){}};
-refresh();loadHistory();scheduleSecurityExpiry();setInterval(refresh,CFG.refreshMs);setInterval(loadHistory,60000);
+refresh();loadHistory();scheduleSecurityExpiry();setTimeout(addSecurityButtons,0);setInterval(refresh,CFG.refreshMs);setInterval(loadHistory,60000);
