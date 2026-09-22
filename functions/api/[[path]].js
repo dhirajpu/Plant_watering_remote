@@ -114,22 +114,33 @@ async function claimEnrollment(body, request, env) {
   const deviceId = normalizeDeviceId(body.deviceId), token = String(body.token || "").trim();
   if (!DEVICE_RE.test(deviceId) || token.length < 32) return fail("Invalid enrollment data.");
   const tokenHash = await sha256Hex(token), t = now();
-  const result = await env.DB.prepare(
-    "UPDATE enrollment_tokens SET status='claimed',used_at=?,used_by_customer_id=? WHERE device_id=? AND token_hash=? AND status='issued' AND expires_at>? AND used_at IS NULL"
-  ).bind(t,customer.id,deviceId,tokenHash,t).run();
-  if (!result.meta?.changes) return fail("Invalid, expired, or already-used enrollment token.", 403);
-  const device = await env.DB.prepare("SELECT * FROM devices WHERE device_id=? LIMIT 1").bind(deviceId).first();
-  if (device?.owner_customer_id && device.owner_customer_id !== customer.id) {
-    await env.DB.prepare("UPDATE enrollment_tokens SET status='issued',used_at=NULL,used_by_customer_id=NULL WHERE device_id=? AND used_by_customer_id=?").bind(deviceId,customer.id).run();
-    return fail("This device is already claimed by another customer.", 409);
-  }
   const tIso = new Date(t).toISOString();
-  if (!device) return fail("The device has not registered with the cloud yet. Power it on and connect it to Wi-Fi, then generate a new QR.", 409);
-  await env.DB.batch([
-    env.DB.prepare("UPDATE devices SET owner_customer_id=?,updated_at=? WHERE device_id=?").bind(customer.id,t,deviceId),
-    env.DB.prepare("INSERT INTO audit_logs(customer_id,device_id,action,details_json,created_at) VALUES(?,?,?,?,?)").bind(customer.id,deviceId,"device_claimed",JSON.stringify({source:"secure-enrollment-qr",claimedAt:tIso}),t)
+
+  // Claim the device and consume the exact enrollment token in one atomic D1 batch.
+  // The device UPDATE only succeeds while the device is unowned and the token is
+  // still valid/issued. The token UPDATE then succeeds only for the customer who
+  // won that device claim. A concurrent claimant therefore cannot steal the device
+  // or consume the winner's token.
+  const result = await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE devices SET owner_customer_id=?,updated_at=? WHERE device_id=? AND disabled=0 AND owner_customer_id IS NULL AND EXISTS (SELECT 1 FROM enrollment_tokens WHERE device_id=? AND token_hash=? AND status='issued' AND used_at IS NULL AND expires_at>?)"
+    ).bind(customer.id, t, deviceId, deviceId, tokenHash, t),
+    env.DB.prepare(
+      "UPDATE enrollment_tokens SET status='claimed',used_at=?,used_by_customer_id=? WHERE device_id=? AND token_hash=? AND status='issued' AND used_at IS NULL AND expires_at>? AND EXISTS (SELECT 1 FROM devices WHERE device_id=? AND owner_customer_id=?)"
+    ).bind(t, customer.id, deviceId, tokenHash, t, deviceId, customer.id)
   ]);
-  return json({ deviceId, claimed:true });
+
+  const deviceChanges = Number(result?.[0]?.meta?.changes || 0);
+  const tokenChanges = Number(result?.[1]?.meta?.changes || 0);
+  if (deviceChanges !== 1 || tokenChanges !== 1) {
+    return fail("Invalid, expired, already-used, or already-claimed enrollment token.", 409);
+  }
+
+  await audit(env, customer.id, deviceId, "device_claimed", {
+    source: "secure-enrollment-qr",
+    claimedAt: tIso
+  });
+  return json({ deviceId, claimed: true });
 }
 
 async function deviceRegister(body, env) {
