@@ -1,6 +1,6 @@
 (() => {
   const KEY="plantV3SuperAdminSession";
-  let session=null, devices=[], customers=[], supportTimer=null;
+  let session=null, devices=[], customers=[], supportTimer=null, supportSessions={};
   const $=id=>document.getElementById(id);
   const esc=v=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"}[c]));
   const api=async(path,opts={})=>{
@@ -9,9 +9,9 @@
   };
   const msg=(id,text,err=false)=>{const e=$(id);if(!e)return;e.textContent=text||"";e.className=err?"auth-error":"auth-status";e.hidden=!text};
   const toast=t=>{const e=$("adminToast");e.textContent=t;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,3000)};
-  const save=()=>localStorage.setItem(KEY,JSON.stringify(session));
-  const load=()=>{try{session=JSON.parse(localStorage.getItem(KEY)||"null")}catch{session=null}};
-  const clear=()=>{session=null;localStorage.removeItem(KEY)};
+  const save=()=>sessionStorage.setItem(KEY,JSON.stringify(session));
+  const load=()=>{try{session=JSON.parse(sessionStorage.getItem(KEY)||"null")}catch{session=null}};
+  const clear=()=>{session=null;sessionStorage.removeItem(KEY)};
   const dt=v=>v?new Date(Number(v)).toLocaleString():"Never";
   const pill=(text,kind="")=>`<span class="status-pill ${kind}">${esc(text)}</span>`;
   function showApp(){ $("loginShell").hidden=true; $("adminShell").hidden=false; $("adminUser").textContent=session.admin.email; loadAll(); }
@@ -48,8 +48,8 @@
   window.adminOwner=async deviceId=>{const email=prompt("Customer email. Leave blank to remove ownership.");if(email===null)return;try{await api("/superadmin/device/owner",{method:"POST",body:JSON.stringify({deviceId,email})});toast("Ownership updated.");loadAll()}catch(e){toast(e.message)}};
   window.adminCustomerDevices=email=>{const list=devices.filter(d=>d.ownerEmail===email).map(d=>d.deviceId);alert(email+"\n\nDevices:\n"+(list.join("\n")||"None"))};
   window.adminSupport=async deviceId=>{document.querySelector('[data-view="support"]').click();setTimeout(()=>document.getElementById("support-"+deviceId)?.scrollIntoView({behavior:"smooth"}),50)};
-  window.adminStartSupport=async deviceId=>{try{const s=await api("/superadmin/support/start",{method:"POST",body:JSON.stringify({deviceId})});toast("Support session started for 30 minutes.");if(s.expiresAt){clearInterval(supportTimer);supportTimer=setInterval(()=>{if(Date.now()>=s.expiresAt){clearInterval(supportTimer);toast("Support session expired.")}},1000)}}catch(e){toast(e.message)}};
-  window.adminSupportCommand=async(deviceId,action)=>{if(!confirm(action==="emergency_stop"?"Send Emergency Stop to this controller?":"Send "+action+" to this controller?"))return;try{await api("/superadmin/device/command",{method:"POST",body:JSON.stringify({deviceId,action,extra:{}})});toast("Command sent to controller.");loadAudit()}catch(e){toast(e.message)}};
+  window.adminStartSupport=async deviceId=>{try{const s=await api("/superadmin/support/start",{method:"POST",body:JSON.stringify({deviceId})});supportSessions[deviceId]=s.id;toast("Support session started for 30 minutes.");if(s.expiresAt){clearInterval(supportTimer);supportTimer=setInterval(()=>{if(Date.now()>=s.expiresAt){clearInterval(supportTimer);toast("Support session expired.")}},1000)}}catch(e){toast(e.message)}};
+  window.adminSupportCommand=async(deviceId,action)=>{if(!confirm(action==="emergency_stop"?"Send Emergency Stop to this controller?":"Send "+action+" to this controller?"))return;try{await api("/superadmin/device/command",{method:"POST",body:JSON.stringify({deviceId,action,supportSessionId:supportSessions[deviceId],extra:{}})});toast("Command sent to controller.");loadAudit()}catch(e){toast(e.message)}};
   $("registerDeviceBtn").onclick=async()=>{msg("registerStatus","Registering…");try{const j=await api("/superadmin/device/register",{method:"POST",body:JSON.stringify({deviceId:$("regDeviceId").value.trim(),deviceSecret:$("regDeviceSecret").value})});msg("registerStatus",j.created?"Device registered.":"Device already registered.");$("regDeviceSecret").value="";loadAll()}catch(e){msg("registerStatus",e.message,true)}};
   $("generateQrBtn").onclick=async()=>{msg("qrStatus","Generating secure token…");$("qrResult").hidden=true;try{const j=await api("/superadmin/enrollment/create",{method:"POST",body:JSON.stringify({deviceId:$("qrDevice").value})});const url=new URL("/index.html",location.origin);url.hash=new URLSearchParams({device:j.deviceId,enroll:j.token}).toString();$("qr").innerHTML="";new QRCode($("qr"),{text:url.href,width:280,height:280});$("qrText").textContent=j.deviceId;$("qrResult").hidden=false;msg("qrStatus","QR generated successfully.");const tick=()=>{const left=Math.max(0,j.expiresAt-Date.now());$("qrCountdown").textContent=left?"QR expires in "+Math.ceil(left/1000)+" seconds.":"QR expired — generate a new QR.";if(left)setTimeout(tick,1000)};tick();loadDevices()}catch(e){msg("qrStatus",e.message,true)}};
   $("printQrBtn").onclick=()=>window.print();
