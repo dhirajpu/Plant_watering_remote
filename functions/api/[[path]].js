@@ -398,7 +398,7 @@ async function deviceApi(deviceId, subPath, request, env) {
   }
   const configMatch=path.match(/^config\/plants\/(\d+)$/);
   if(configMatch){
-    const i=Number(configMatch[1]); if(i<0||i>4)return fail("Invalid plant index.");
+    const i=Number(configMatch[1]); if(i<0||!Number.isSafeInteger(i))return fail("Invalid plant index.");
     if(method==="GET"){const r=await env.DB.prepare("SELECT config_json FROM device_configs WHERE device_id=? AND plant_index=?").bind(deviceId,i).first();return json(parseJsonText(r?.config_json));}
     await env.DB.prepare("INSERT INTO device_configs(device_id,plant_index,config_json,updated_at) VALUES(?,?,?,?) ON CONFLICT(device_id,plant_index) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at").bind(deviceId,i,JSON.stringify(body||{}),t).run();
     return json({ok:true});
