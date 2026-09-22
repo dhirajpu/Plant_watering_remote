@@ -48,6 +48,12 @@ This feature is an application/firmware control layer. It does **not** replace F
 5. Open Diagnostics and use **Change Control Password** to set the permanent password.
 6. Use **Lock Controls** whenever you want to lock the dashboard immediately.
 
+## Configuration protection
+
+Plant configuration is migrated from the existing Firebase configuration into ESP32 NVS on the first boot of this security firmware. After migration, configuration changes are accepted by the controller only through authenticated commands and are persisted in NVS; the controller then mirrors the accepted configuration back to Firebase. This prevents a direct unauthenticated Firebase write from becoming a live controller configuration change.
+
+ESP32 Preferences/NVS is non-volatile and is retained across restarts and power loss. The security password hash and plant configuration are therefore available after reboot.
+
 ## Existing V2 behavior preserved
 
 The security layer does not change the automatic watering algorithm, sensor fault handling, heartbeat/offline detection, NTP timestamps, watering history, Firebase telemetry/history, or OTA update mechanism. OTA itself remains protected by its existing OTA username/password in addition to the dashboard control-password gate.
