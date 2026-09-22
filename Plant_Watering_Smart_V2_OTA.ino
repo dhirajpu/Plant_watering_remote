@@ -191,7 +191,7 @@ void evaluateWatering(){
 
 String plantConfigJson(int i){
   PlantConfig &c=plants[i];
-  return "{\\\"name\\\":\\\""+safetyName(c.name)+"\\\",\\\"targetLow\\\":"+String(c.targetLow)+",\\\"targetHigh\\\":"+String(c.targetHigh)+",\\\"burstMs\\\":"+String(c.burstMs)+",\\\"soakSec\\\":"+String(c.soakMs/1000UL)+",\\\"minIntervalMin\\\":"+String(c.minIntervalMs/60000UL)+",\\\"mode\\\":\\\""+modeText(c.mode)+"\\\",\\\"airRaw\\\":"+String(c.airRaw)+",\\\"wetRaw\\\":"+String(c.wetRaw)+"}";
+  return "{\"name\":\""+safetyName(c.name)+"\",\"targetLow\":"+String(c.targetLow)+",\"targetHigh\":"+String(c.targetHigh)+",\"burstMs\":"+String(c.burstMs)+",\"soakSec\":"+String(c.soakMs/1000UL)+",\"minIntervalMin\":"+String(c.minIntervalMs/60000UL)+",\"mode\":\""+modeText(c.mode)+"\",\"airRaw\":"+String(c.airRaw)+",\"wetRaw\":"+String(c.wetRaw)+"}";
 }
 void savePlantConfigNvs(int i){
   prefs.begin("plantcfg",false);
@@ -215,6 +215,7 @@ bool loadPlantConfigNvs(int i){
   plants[i].wetRaw=(int)jsonLong(b,"wetRaw",plants[i].wetRaw);
   return true;
 }
+void updateConfig();
 void loadOrMigratePlantConfig(){
   prefs.begin("plantcfg",true);
   bool initialized=prefs.getBool("init",false);
