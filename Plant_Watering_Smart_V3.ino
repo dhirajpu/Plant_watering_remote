@@ -22,7 +22,7 @@
 static const char *WIFI_SSID = "";
 static const char *WIFI_PASSWORD = "";
 // Cloudflare Pages/Workers API. Replace with the final production Pages domain before flashing.
-static const char *CLOUD_API_BASE_URL = "https://REPLACE_WITH_CLOUDFLARE_PAGES_DOMAIN/api";
+static const char *CLOUD_API_BASE_URL = "https://plant-watering-remote.kumardhiraj93.workers.dev/api";
 // Cloud deployment version. Set this to the final production Pages URL before flashing.
 static const char *OTA_PASSWORD = "";
 static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V3_COMMERCIAL_1.0";
