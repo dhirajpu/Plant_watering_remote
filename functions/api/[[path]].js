@@ -65,6 +65,187 @@ async function audit(env, customerId, deviceId, action, details = {}) {
 }
 function parseJsonText(text, fallback = {}) { try { return text ? JSON.parse(text) : fallback; } catch { return fallback; } }
 
+const SUPER_ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const SUPPORT_SESSION_TTL_MS = 30 * 60 * 1000;
+
+async function superAdminFromSession(request, env) {
+  const token = bearer(request);
+  if (!token) return null;
+  const hash = await sha256Hex(token);
+  const row = await env.DB.prepare(
+    "SELECT a.id,a.email,a.name,a.disabled FROM super_admin_sessions s JOIN super_admins a ON a.id=s.admin_id WHERE s.token_hash=? AND s.expires_at>? LIMIT 1"
+  ).bind(hash, now()).first();
+  if (!row || row.disabled) return null;
+  await env.DB.prepare("UPDATE super_admin_sessions SET last_seen_at=? WHERE token_hash=?").bind(now(), hash).run();
+  return row;
+}
+
+async function superAdminRequired(request, env) {
+  const admin = await superAdminFromSession(request, env);
+  return admin ? { admin } : { error: fail("Super Admin authentication required.", 401) };
+}
+
+async function adminLogin(body, env) {
+  const email = normalizeEmail(body.email), password = String(body.password || "");
+  if (!email || !password) return fail("Email and password are required.", 400);
+
+  let row = await env.DB.prepare("SELECT * FROM super_admins WHERE email=? LIMIT 1").bind(email).first();
+
+  // Secure bootstrap: the first admin can be created only from a server-side
+  // Wrangler secret pair. Remove SUPERADMIN_PASSWORD after the first bootstrap.
+  if (!row && env.SUPERADMIN_EMAIL && env.SUPERADMIN_PASSWORD && email === normalizeEmail(env.SUPERADMIN_EMAIL) && password === env.SUPERADMIN_PASSWORD) {
+    const id = crypto.randomUUID(), salt = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+    const hash = await pbkdf2(password, salt), t = now();
+    await env.DB.prepare("INSERT INTO super_admins(id,email,name,password_salt,password_hash,created_at,updated_at) VALUES(?,?,?,?,?,?,?)")
+      .bind(id,email,"Super Admin",salt,hash,t,t).run();
+    row = await env.DB.prepare("SELECT * FROM super_admins WHERE id=?").bind(id).first();
+    await audit(env, id, null, "super_admin_bootstrapped", { email });
+  }
+
+  if (!row || row.disabled) return fail("Incorrect email or password.", 401);
+  const hash = await pbkdf2(password, row.password_salt);
+  if (hash !== row.password_hash) return fail("Incorrect email or password.", 401);
+
+  const token = randomToken(), tokenHash = await sha256Hex(token), t = now();
+  await env.DB.prepare("INSERT INTO super_admin_sessions(token_hash,admin_id,expires_at,created_at,last_seen_at) VALUES(?,?,?,?,?)")
+    .bind(tokenHash,row.id,t+SUPER_ADMIN_SESSION_TTL_MS,t,t).run();
+  await audit(env, row.id, null, "super_admin_login", { email: row.email });
+  return json({ token, expiresAt: t + SUPER_ADMIN_SESSION_TTL_MS, admin: { id: row.id, email: row.email, name: row.name } });
+}
+
+async function adminMe(request, env) {
+  const admin = await superAdminFromSession(request, env);
+  if (!admin) return fail("Session expired.", 401);
+  return json({ admin });
+}
+
+async function adminStats(request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const [d,c,aud,s]=await Promise.all([
+    env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN owner_customer_id IS NOT NULL THEN 1 ELSE 0 END) AS claimed, SUM(CASE WHEN disabled=1 THEN 1 ELSE 0 END) AS disabled FROM devices").first(),
+    env.DB.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN disabled=1 THEN 1 ELSE 0 END) AS disabled FROM customers").first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM audit_logs").first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM support_sessions WHERE status='active' AND expires_at>?").bind(now()).first()
+  ]);
+  return json({devices:Number(d?.n||0),claimed:Number(d?.claimed||0),disabledDevices:Number(d?.disabled||0),customers:Number(c?.n||0),disabledCustomers:Number(c?.disabled||0),auditLogs:Number(aud?.n||0),activeSupport:Number(s?.n||0)});
+}
+
+async function adminDevices(request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const rows=await env.DB.prepare("SELECT d.device_id AS deviceId,d.firmware_version AS firmware,d.last_seen_at AS lastSeen,d.created_at AS createdAt,d.updated_at AS updatedAt,d.maintenance_expires_at AS maintenanceExpires,d.disabled,d.owner_customer_id AS ownerId,c.email AS ownerEmail,c.name AS ownerName,d.status_json AS status FROM devices d LEFT JOIN customers c ON c.id=d.owner_customer_id ORDER BY d.created_at DESC").all();
+  return json(rows.results.map(x=>({...x,disabled:!!x.disabled,status:parseJsonText(x.status)})));
+}
+
+async function adminCustomers(request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const rows=await env.DB.prepare("SELECT c.id,c.email,c.name,c.created_at AS createdAt,c.updated_at AS updatedAt,c.disabled,COUNT(d.device_id) AS deviceCount FROM customers c LEFT JOIN devices d ON d.owner_customer_id=c.id GROUP BY c.id ORDER BY c.created_at DESC").all();
+  return json(rows.results.map(x=>({...x,disabled:!!x.disabled,deviceCount:Number(x.deviceCount||0)})));
+}
+
+async function adminAudit(request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const rows=await env.DB.prepare("SELECT a.id,a.action,a.created_at AS createdAt,a.details_json AS details,a.customer_id AS customerId,a.device_id AS deviceId,c.email AS customerEmail FROM audit_logs a LEFT JOIN customers c ON c.id=a.customer_id ORDER BY a.created_at DESC LIMIT 250").all();
+  return json(rows.results.map(x=>({...x,details:parseJsonText(x.details)})));
+}
+
+async function adminRegisterDevice(body, request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const deviceId=normalizeDeviceId(body.deviceId), secret=String(body.deviceSecret||"");
+  if(!DEVICE_RE.test(deviceId)||secret.length<32)return fail("Valid Device ID and a 32+ character device secret are required.");
+  const hash=await sha256Hex(secret), t=now();
+  const existing=await env.DB.prepare("SELECT device_id,device_secret_hash FROM devices WHERE device_id=?").bind(deviceId).first();
+  if(existing && existing.device_secret_hash!==hash)return fail("Device already exists with a different secret.",409);
+  if(!existing)await env.DB.prepare("INSERT INTO devices(device_id,device_secret_hash,created_at,updated_at,last_seen_at) VALUES(?,?,?,?,?)").bind(deviceId,hash,t,t,t).run();
+  else await env.DB.prepare("UPDATE devices SET updated_at=? WHERE device_id=?").bind(t,deviceId).run();
+  await audit(env,a.admin.id,deviceId,"admin_device_registered",{source:"superadmin"});
+  return json({ok:true,deviceId,created:!existing},existing?200:201);
+}
+
+async function adminCreateEnrollment(body, request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const deviceId=normalizeDeviceId(body.deviceId);
+  if(!DEVICE_RE.test(deviceId))return fail("Invalid Device ID. Expected ESPBOARD-XXXXXX.");
+  const device=await env.DB.prepare("SELECT device_id,owner_customer_id,disabled FROM devices WHERE device_id=? LIMIT 1").bind(deviceId).first();
+  if(!device)return fail("Device is not registered yet.",404);
+  if(device.disabled)return fail("This device is disabled.",403);
+  if(device.owner_customer_id)return fail("This device is already claimed.",409);
+  const token=randomToken(32),t=now(),hash=await sha256Hex(token);
+  await env.DB.prepare("INSERT INTO enrollment_tokens(device_id,token_hash,issued_at,expires_at,status) VALUES(?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET token_hash=excluded.token_hash,issued_at=excluded.issued_at,expires_at=excluded.expires_at,used_at=NULL,used_by_customer_id=NULL,status='issued'")
+    .bind(deviceId,hash,t,t+TOKEN_TTL_MS,"issued").run();
+  await audit(env,a.admin.id,deviceId,"enrollment_qr_generated",{expiresAt:t+TOKEN_TTL_MS});
+  return json({deviceId,token,expiresAt:t+TOKEN_TTL_MS,expiresInSeconds:TOKEN_TTL_MS/1000});
+}
+
+async function adminSetDevice(body, request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const deviceId=normalizeDeviceId(body.deviceId);
+  if(!DEVICE_RE.test(deviceId))return fail("Invalid Device ID.");
+  const device=await env.DB.prepare("SELECT device_id FROM devices WHERE device_id=?").bind(deviceId).first();
+  if(!device)return fail("Device not found.",404);
+  const t=now();
+  if(body.disabled!==undefined){
+    await env.DB.prepare("UPDATE devices SET disabled=?,updated_at=? WHERE device_id=?").bind(body.disabled?1:0,t,deviceId).run();
+    await audit(env,a.admin.id,deviceId,body.disabled?"device_disabled":"device_enabled",{});
+  }
+  if(body.maintenanceExpiresAt!==undefined){
+    const v=body.maintenanceExpiresAt===null?null:Number(body.maintenanceExpiresAt);
+    await env.DB.prepare("UPDATE devices SET maintenance_expires_at=?,updated_at=? WHERE device_id=?").bind(v,t,deviceId).run();
+    await audit(env,a.admin.id,deviceId,"maintenance_updated",{maintenanceExpiresAt:v});
+  }
+  return json({ok:true});
+}
+
+async function adminAssignOwner(body, request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const deviceId=normalizeDeviceId(body.deviceId), email=normalizeEmail(body.email);
+  if(!DEVICE_RE.test(deviceId))return fail("Invalid Device ID.");
+  const device=await env.DB.prepare("SELECT device_id,owner_customer_id FROM devices WHERE device_id=?").bind(deviceId).first();
+  if(!device)return fail("Device not found.",404);
+  let customer=null;
+  if(email)customer=await env.DB.prepare("SELECT id,email,name FROM customers WHERE email=? AND disabled=0 LIMIT 1").bind(email).first();
+  if(email&&!customer)return fail("Customer not found or disabled.",404);
+  await env.DB.prepare("UPDATE devices SET owner_customer_id=?,updated_at=? WHERE device_id=?").bind(customer?.id||null,now(),deviceId).run();
+  await audit(env,a.admin.id,deviceId,customer?"device_owner_assigned":"device_owner_removed",{customerId:customer?.id||null,email:customer?.email||null});
+  return json({ok:true,owner:customer||null});
+}
+
+async function adminCommand(body, request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const deviceId=normalizeDeviceId(body.deviceId), action=String(body.action||"").trim();
+  const allowed=["emergency_stop","resume","water_now","set_mode","clear_fault","calibrate_dry","calibrate_wet","set_config"];
+  if(!DEVICE_RE.test(deviceId)||!allowed.includes(action))return fail("Unsupported device command.");
+  const device=await env.DB.prepare("SELECT device_id,disabled,owner_customer_id FROM devices WHERE device_id=?").bind(deviceId).first();
+  if(!device)return fail("Device not found.",404);
+  if(device.disabled)return fail("Device is disabled.",403);
+  const id=commandId?commandId():randomToken(16), t=now();
+  const command={id,action,...body.extra,issuedAtEpochSec:Math.floor(t/1000),source:"superadmin",adminId:a.admin.id};
+  await env.DB.prepare("INSERT INTO device_commands(device_id,command_json,updated_at) VALUES(?,?,?) ON CONFLICT(device_id) DO UPDATE SET command_json=excluded.command_json,updated_at=excluded.updated_at")
+    .bind(deviceId,JSON.stringify(command),t).run();
+  await audit(env,a.admin.id,deviceId,"support_command_issued",{action,commandId:id});
+  return json({ok:true,id});
+}
+
+async function adminStartSupport(body, request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const deviceId=normalizeDeviceId(body.deviceId);
+  const device=await env.DB.prepare("SELECT device_id,disabled FROM devices WHERE device_id=?").bind(deviceId).first();
+  if(!device)return fail("Device not found.",404);
+  if(device.disabled)return fail("Device is disabled.",403);
+  const id=crypto.randomUUID(),t=now(),expires=t+SUPPORT_SESSION_TTL_MS;
+  await env.DB.prepare("INSERT INTO support_sessions(id,device_id,admin_id,expires_at,status,created_at) VALUES(?,?,?,?,?,?)").bind(id,deviceId,a.admin.id,expires,"active",t).run();
+  await audit(env,a.admin.id,deviceId,"support_session_started",{supportSessionId:id,expiresAt:expires});
+  return json({id,deviceId,expiresAt:expires});
+}
+
+async function adminEndSupport(body, request, env) {
+  const a=await superAdminRequired(request,env); if(a.error)return a.error;
+  const id=String(body.id||""); if(!id)return fail("Support session id required.");
+  await env.DB.prepare("UPDATE support_sessions SET status='ended',ended_at=? WHERE id=? AND admin_id=? AND status='active'").bind(now(),id,a.admin.id).run();
+  await audit(env,a.admin.id,null,"support_session_ended",{supportSessionId:id});
+  return json({ok:true});
+}
+
+
 async function authRegister(body, env) {
   const email = normalizeEmail(body.email), password = String(body.password || ""), name = String(body.name || "").trim();
   if (!email || !email.includes("@") || password.length < 8 || name.length < 2) return fail("Name, valid email and an 8+ character password are required.");
@@ -243,6 +424,19 @@ export async function onRequest(context) {
     if(route==="auth/register"&&request.method==="POST")return authRegister(await request.json(),env);
     if(route==="auth/login"&&request.method==="POST")return authLogin(await request.json(),env);
     if(route==="auth/me"&&request.method==="GET")return authMe(request,env);
+    if(route==="superadmin/login"&&request.method==="POST")return adminLogin(await request.json(),env);
+    if(route==="superadmin/me"&&request.method==="GET")return adminMe(request,env);
+    if(route==="superadmin/stats"&&request.method==="GET")return adminStats(request,env);
+    if(route==="superadmin/devices"&&request.method==="GET")return adminDevices(request,env);
+    if(route==="superadmin/customers"&&request.method==="GET")return adminCustomers(request,env);
+    if(route==="superadmin/audit"&&request.method==="GET")return adminAudit(request,env);
+    if(route==="superadmin/device/register"&&request.method==="POST")return adminRegisterDevice(await request.json(),request,env);
+    if(route==="superadmin/enrollment/create"&&request.method==="POST")return adminCreateEnrollment(await request.json(),request,env);
+    if(route==="superadmin/device/update"&&request.method==="POST")return adminSetDevice(await request.json(),request,env);
+    if(route==="superadmin/device/owner"&&request.method==="POST")return adminAssignOwner(await request.json(),request,env);
+    if(route==="superadmin/device/command"&&request.method==="POST")return adminCommand(await request.json(),request,env);
+    if(route==="superadmin/support/start"&&request.method==="POST")return adminStartSupport(await request.json(),request,env);
+    if(route==="superadmin/support/end"&&request.method==="POST")return adminEndSupport(await request.json(),request,env);
     if(route==="enrollment/create"&&request.method==="POST")return createEnrollment(await request.json(),request,env);
     if(route==="enrollment/claim"&&request.method==="POST")return claimEnrollment(await request.json(),request,env);
     if(route==="device/register"&&request.method==="POST")return deviceRegister(await request.json(),env);
