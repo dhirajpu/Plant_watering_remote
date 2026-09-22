@@ -3,6 +3,7 @@ window.PLANT_V3_CONFIG = {
   // Firebase Console -> Project settings -> Your apps -> Web API Key.
   firebaseApiKey: "REPLACE_WITH_FIREBASE_WEB_API_KEY",
   deviceRoot: "/plantMonitor/v3/devices/REPLACE_WITH_DEVICE_ID",
+  functionsRegion: "asia-southeast1",
   authToken: "",
   deviceId: "",
   staleTimeoutSec: 15,
