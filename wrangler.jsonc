@@ -2,5 +2,12 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "plant-life-care-v3",
   "pages_build_output_dir": "./v3",
-  "compatibility_date": "2026-09-22"
+  "compatibility_date": "2026-09-22",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "plantcaremaindb",
+      "database_id": "bb073e27-66f0-4217-bec0-c1fbc9e4369a"
+    }
+  ]
 }
