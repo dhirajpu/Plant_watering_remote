@@ -1,17 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "plant-life-care-v3",
-  "pages_build_output_dir": ".",
-  "compatibility_date": "2026-09-22",
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "plantCareMainDB",
-      "database_id": "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "vars": {
-    "FACTORY_ENROLLMENT_KEY": "SET_IN_CLOUDFLARE_DASHBOARD_SECRET"
-  }
+  "pages_build_output_dir": "./v3",
+  "compatibility_date": "2026-09-22"
 }
