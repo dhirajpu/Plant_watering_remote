@@ -189,6 +189,45 @@ void evaluateWatering(){
   if(!s.watering&&!s.soaking)startBurst(i);
 }
 
+String plantConfigJson(int i){
+  PlantConfig &c=plants[i];
+  return "{\\\"name\\\":\\\""+safetyName(c.name)+"\\\",\\\"targetLow\\\":"+String(c.targetLow)+",\\\"targetHigh\\\":"+String(c.targetHigh)+",\\\"burstMs\\\":"+String(c.burstMs)+",\\\"soakSec\\\":"+String(c.soakMs/1000UL)+",\\\"minIntervalMin\\\":"+String(c.minIntervalMs/60000UL)+",\\\"mode\\\":\\\""+modeText(c.mode)+"\\\",\\\"airRaw\\\":"+String(c.airRaw)+",\\\"wetRaw\\\":"+String(c.wetRaw)+"}";
+}
+void savePlantConfigNvs(int i){
+  prefs.begin("plantcfg",false);
+  prefs.putString((String("p")+i).c_str(),plantConfigJson(i));
+  prefs.putBool("init",true);
+  prefs.end();
+}
+bool loadPlantConfigNvs(int i){
+  prefs.begin("plantcfg",true);
+  String b=prefs.getString((String("p")+i).c_str(),"");
+  prefs.end();
+  if(!b.length())return false;
+  String n=jsonValue(b,"name");if(n.length())plants[i].name=n;
+  plants[i].targetLow=constrain((int)jsonLong(b,"targetLow",plants[i].targetLow),0,95);
+  plants[i].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[i].targetHigh),plants[i].targetLow+1,100);
+  plants[i].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[i].burstMs),1000UL,plants[i].maxBurstMs);
+  plants[i].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[i].soakMs/1000UL),10UL,1800UL)*1000UL;
+  plants[i].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[i].minIntervalMs/60000UL),1UL,1440UL)*60000UL;
+  String m=jsonValue(b,"mode");if(m.length())plants[i].mode=parseMode(m);
+  plants[i].airRaw=(int)jsonLong(b,"airRaw",plants[i].airRaw);
+  plants[i].wetRaw=(int)jsonLong(b,"wetRaw",plants[i].wetRaw);
+  return true;
+}
+void loadOrMigratePlantConfig(){
+  prefs.begin("plantcfg",true);
+  bool initialized=prefs.getBool("init",false);
+  prefs.end();
+  if(initialized){
+    for(int i=0;i<NUM_PLANTS;i++)loadPlantConfigNvs(i);
+    return;
+  }
+  // One-time migration of the existing Firebase configuration into local NVS.
+  updateConfig();
+  for(int i=0;i<NUM_PLANTS;i++)savePlantConfigNvs(i);
+}
+
 void updateConfig(){for(int i=0;i<NUM_PLANTS;i++){String b;if(!httpGet(String("/config/plants/")+i,b)||!b.length()||b=="null")continue;String n=jsonValue(b,"name");if(n.length())plants[i].name=n;plants[i].targetLow=constrain((int)jsonLong(b,"targetLow",plants[i].targetLow),0,95);plants[i].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[i].targetHigh),plants[i].targetLow+1,100);plants[i].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[i].burstMs),1000UL,plants[i].maxBurstMs);plants[i].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[i].soakMs/1000UL),10UL,1800UL)*1000UL;plants[i].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[i].minIntervalMs/60000UL),1UL,1440UL)*60000UL;String m=jsonValue(b,"mode");if(m.length())plants[i].mode=parseMode(m);}}
 
 String sha256Hex(const String &input){
@@ -253,7 +292,7 @@ void handleSecurity(){
 
 void handleCommand(){
   String b;if(!httpGet("/command",b)||b.length()<2||b=="null")return;String id=jsonValue(b,"id");if(!id.length()||id==lastCommandId)return;String action=jsonValue(b,"action");String authToken=jsonValue(b,"authToken");int p=(int)jsonLong(b,"plantIndex",-1);
-  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet"||action=="change_password";
+  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet"||action=="set_config"||action=="change_password";
   long issuedSec=jsonLong(b,"issuedAtEpochSec",0);
   if(issuedSec<=0){long legacyMs=jsonLong(b,"issuedAtEpochMs",0);if(legacyMs>0)issuedSec=legacyMs/1000L;}
   bool valid=true;
@@ -262,11 +301,12 @@ void handleCommand(){
   if(protectedAction&&!controlSessionValid(authToken))result="unauthorized";
   else if(!valid)result="expired";else if(action=="emergency_stop"){emergencyStop=true;outputsOff();if(activePlant>=0)states[activePlant].lastStopReason=STOP_EMERGENCY;activePlant=-1;saveEmergency();result="stopped";}
   else if(action=="resume"){emergencyStop=false;outputsOff();saveEmergency();result="resumed";}
-  else if(action=="set_mode"&&p>=0&&p<NUM_PLANTS){plants[p].mode=parseMode(jsonValue(b,"mode"));result="mode_set";}
+  else if(action=="set_mode"&&p>=0&&p<NUM_PLANTS){plants[p].mode=parseMode(jsonValue(b,"mode"));savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));httpPut("/config/version",String(millis()));result="mode_set";}
   else if(action=="water_now"&&p>=0&&p<NUM_PLANTS&&!emergencyStop){unsigned long sec=constrain((unsigned long)jsonLong(b,"durationSec",5),1UL,plants[p].maxSessionMs/1000UL);states[p].manualRequest=true;states[p].manualRequestedMs=sec*1000UL;result=canStartPlant(p,true)?"queued":"blocked_by_safety";}
   else if(action=="clear_fault"&&p>=0&&p<NUM_PLANTS){states[p].waterResponseFault=false;if(states[p].sensorFault&&states[p].raw>=SENSOR_MIN_VALID&&states[p].raw<=SENSOR_MAX_VALID)states[p].sensorFault=false;if(!states[p].sensorFault){clearFaultReason(p);states[p].lastStopReason=STOP_NONE;}result="fault_cleared";}
-  else if(action=="calibrate_dry"&&p>=0&&p<NUM_PLANTS){plants[p].airRaw=states[p].raw;result="dry_recorded";}
-  else if(action=="calibrate_wet"&&p>=0&&p<NUM_PLANTS){plants[p].wetRaw=states[p].raw;result="wet_recorded";}
+  else if(action=="calibrate_dry"&&p>=0&&p<NUM_PLANTS){plants[p].airRaw=states[p].raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="dry_recorded";}
+  else if(action=="calibrate_wet"&&p>=0&&p<NUM_PLANTS){plants[p].wetRaw=states[p].raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="wet_recorded";}
+  else if(action=="set_config"&&p>=0&&p<NUM_PLANTS){String n=jsonValue(b,"name"),m=jsonValue(b,"mode");if(n.length())plants[p].name=n;plants[p].targetLow=constrain((int)jsonLong(b,"targetLow",plants[p].targetLow),0,95);plants[p].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[p].targetHigh),plants[p].targetLow+1,100);plants[p].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[p].burstMs),1000UL,plants[p].maxBurstMs);plants[p].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[p].soakMs/1000UL),10UL,1800UL)*1000UL;plants[p].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[p].minIntervalMs/60000UL),1UL,1440UL)*60000UL;if(m.length())plants[p].mode=parseMode(m);savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));httpPut("/config/version",String(millis()));result="config_set";}
   else if(action=="change_password"){String newSalt=jsonValue(b,"newSalt"),newHash=jsonValue(b,"newHash");if(newSalt.length()>=16&&newSalt.length()<=64&&newHash.length()==64){prefs.begin("security",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();controlSalt=newSalt;controlPasswordHash=newHash;result="password_changed";}else result="invalid_password_data";}
   if(action=="water_now"&&p>=0&&p<NUM_PLANTS&&result=="queued")startSession(p,true,states[p].manualRequestedMs);
   String ack="{\"id\":\""+safetyName(id)+"\",\"action\":\""+safetyName(action)+"\",\"result\":\""+safetyName(result)+"\",\"handledAtMs\":"+String(millis())+"}";httpPut("/commandAck",ack);lastCommandId=id;
@@ -323,14 +363,13 @@ void connectWifi(){WiFi.mode(WIFI_STA);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);unsig
 
 void setup(){
   Serial.begin(115200);bootMs=millis();for(int i=0;i<NUM_PLANTS;i++){pinMode(SENSOR_PINS[i],INPUT);pinMode(VALVE_PINS[i],OUTPUT);}pinMode(PUMP_PIN,OUTPUT);outputsOff();Wire.begin(SDA_PIN,SCL_PIN);lcd.init();lcd.backlight();lcd.clear();lcd.print("Plant Life Care");
-  loadEmergency();loadRuntime();connectWifi();initControlSecurity();systemReady=true;setupOTA();sampleSensors();publishSecurityMeta();publishStatus();
+  loadEmergency();loadRuntime();connectWifi();initControlSecurity();loadOrMigratePlantConfig();systemReady=true;setupOTA();sampleSensors();publishSecurityMeta();publishStatus();
 }
 void loop(){
   ArduinoOTA.handle();server.handleClient();refreshRuntimeWindows();
   if(WiFi.status()!=WL_CONNECTED){wifiConnected=false;if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){lastWifiRetryMs=millis();connectWifi();}}
   else {wifiConnected=true;deviceIp=WiFi.localIP().toString();}
   if(millis()-lastSensorMs>=SENSOR_SAMPLE_MS)sampleSensors();
-  if(millis()-lastConfigMs>=CONFIG_MS){lastConfigMs=millis();updateConfig();}
   if(millis()-lastCommandMs>=COMMAND_MS){lastCommandMs=millis();handleCommand();}
   if(millis()-lastSecurityMs>=SECURITY_POLL_MS){lastSecurityMs=millis();handleSecurity();}
   if(millis()-lastSecurityRequestMs>=15000UL){lastSecurityRequestMs=millis();publishSecurityMeta();}
