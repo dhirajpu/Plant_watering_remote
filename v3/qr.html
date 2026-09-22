@@ -1,1 +1,39 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Plant Life Care V3 - Device QR</title><link rel="stylesheet" href="./styles.css"></head><body><main class="page"><section class="auth-shell"><div class="auth-card"><p class="eyebrow">Plant Life Care V3</p><h1>Device QR Generator</h1><p class="subtitle">Create a QR that opens customer registration and device claiming for one controller.</p><label>Device ID<input id="deviceId" placeholder="PLANT-A1B2C3" autocomplete="off"></label><button id="make">Generate QR</button><div id="result" class="qr-result" hidden><h2 id="qrTitle"></h2><div id="qr"></div><p id="qrUrl"></p><button onclick="window.print()">Print QR</button></div><p class="auth-error">Development milestone: this QR contains the Device ID. Commercial production should use a one-time enrollment token validated by the backend.</p></div></section></main><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script><script>document.getElementById('make').onclick=()=>{const id=document.getElementById('deviceId').value.trim().toUpperCase();if(!/^PLANT-[A-F0-9]{6}$/.test(id)){alert('Use a Device ID such as PLANT-A1B2C3.');return}const target=new URL('./index.html?device='+encodeURIComponent(id),location.href).href;document.getElementById('qr').innerHTML='';new QRCode(document.getElementById('qr'),{text:target,width:260,height:260});document.getElementById('qrTitle').textContent=id;document.getElementById('qrUrl').textContent=target;document.getElementById('result').hidden=false};</script></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plant Life Care V3 - Secure Device QR</title><link rel="stylesheet" href="./styles.css"></head>
+<body><main class="page"><section class="auth-shell"><div class="auth-card">
+<p class="eyebrow">Plant Life Care V3</p><h1>Secure Device QR</h1>
+<p class="subtitle">Generate a short-lived, one-time enrollment QR for a physical ESPBOARD controller.</p>
+<label>Device ID<input id="deviceId" placeholder="ESPBOARD-A1B2C3" autocomplete="off"></label>
+<label>Factory enrollment key<input id="adminKey" type="password" autocomplete="off"></label>
+<button id="make">Generate Secure QR</button>
+<div id="result" class="qr-result" hidden><h2 id="qrTitle"></h2><div id="qr"></div>
+<p><strong>QR validity:</strong> 15 minutes or until claimed.</p><p id="qrUrl"></p><button onclick="window.print()">Print QR</button></div>
+<p class="auth-error">The QR contains a one-time enrollment token, not the permanent device credential. Never publish the factory enrollment key.</p>
+<p class="muted">After the customer scans the QR, the token is consumed by the secure backend when the customer claims the device.</p>
+</div></section></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+const FUNCTIONS_BASE='https://asia-southeast1-vernal-catfish-196407.cloudfunctions.net/';
+document.getElementById('make').onclick=async()=>{
+  const id=document.getElementById('deviceId').value.trim().toUpperCase();
+  const key=document.getElementById('adminKey').value;
+  if(!/^ESPBOARD-[A-F0-9]{6}$/.test(id)){alert('Use a Device ID such as ESPBOARD-A1B2C3.');return}
+  if(!key){alert('Enter the factory enrollment key.');return}
+  const b=document.getElementById('make');b.disabled=true;b.textContent='Generating secure QR...';
+  try{
+    const r=await fetch(FUNCTIONS_BASE+'createEnrollmentToken',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{deviceId:id,adminKey:key}})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||j.error)throw new Error(j?.error?.message||'Unable to create enrollment token.');
+    const token=j.data.token;
+    const target=new URL('./index.html?device='+encodeURIComponent(id)+'&enroll='+encodeURIComponent(token),location.href).href;
+    document.getElementById('qr').innerHTML='';
+    new QRCode(document.getElementById('qr'),{text:target,width:260,height:260});
+    document.getElementById('qrTitle').textContent=id;
+    document.getElementById('qrUrl').textContent='Secure enrollment link generated. Do not share the URL/token separately.';
+    document.getElementById('result').hidden=false;
+  }catch(e){alert(e.message||'Unable to generate secure QR.')}
+  finally{b.disabled=false;b.textContent='Generate Secure QR'}
+};
+</script></body></html>
