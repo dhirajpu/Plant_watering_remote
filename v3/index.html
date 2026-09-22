@@ -9,7 +9,7 @@
 <p id="claimHint" class="subtitle">Sign in or register to connect your smart watering controller.</p>
 <div id="registerForm"><h2>Create customer account</h2><label>Name<input id="customerName" autocomplete="name"></label><label>Email<input id="customerEmail" type="email" autocomplete="email"></label><label>Password<input id="customerPassword" type="password" autocomplete="new-password"></label><button id="registerBtn">Register & Continue</button><button id="showLogin" class="secondary">Already have an account? Sign in</button></div>
 <div id="loginForm" hidden><h2>Sign in</h2><label>Email<input id="loginEmail" type="email" autocomplete="email"></label><label>Password<input id="loginPassword" type="password" autocomplete="current-password"></label><button id="loginBtn">Sign in</button><button id="showRegister" class="secondary">Create a customer account</button></div>
-<div class="claim-box"><strong>Device QR</strong><p>Scan the QR from your device box, or enter the Device ID below.</p><input id="claimDevice" placeholder="PLANT-A1B2C3" autocomplete="off"><button id="claimBtn" class="secondary">Claim Device</button></div>
+<div class="claim-box"><strong>Device QR</strong><p>Scan the secure QR from your device box. The QR contains a one-time enrollment token.</p><input id="claimDevice" placeholder="ESPBOARD-A1B2C3" autocomplete="off"><button id="claimBtn" class="secondary">Claim Secure Device</button></div>
 <p id="authStatus" class="auth-status"></p><p id="authError" class="auth-error" hidden></p><button id="logoutLink" class="text-button">Sign out</button>
 </div></section>
 
