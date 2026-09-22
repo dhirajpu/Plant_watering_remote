@@ -396,6 +396,29 @@ async function deviceApi(deviceId, subPath, request, env) {
     await env.DB.prepare("INSERT INTO device_commands(device_id,ack_json,updated_at) VALUES(?,?,?) ON CONFLICT(device_id) DO UPDATE SET ack_json=excluded.ack_json,updated_at=excluded.updated_at").bind(deviceId,JSON.stringify(body||{}),t).run();
     return json({ok:true});
   }
+  if(path==="config/setup"&&method==="PUT"){
+    const body=await request.json().catch(()=>({}));
+    const sensorCount=Number(body.sensorCount), valveCount=Number(body.valveCount);
+    const plants=Array.isArray(body.plants)?body.plants:[];
+    if(!Number.isSafeInteger(sensorCount)||sensorCount<1||!Number.isSafeInteger(valveCount)||valveCount<1)
+      return fail("Sensor and valve counts must both be positive whole numbers.");
+    if(sensorCount!==valveCount)
+      return fail(`Sensor count (${sensorCount}) must match valve count (${valveCount}).`);
+    if(plants.length!==sensorCount)
+      return fail(`Plant setup must contain exactly ${sensorCount} sensor/valve pairs.`);
+    for(let i=0;i<plants.length;i++){
+      if(!plants[i]||Number(plants[i].sensorIndex)!==i||Number(plants[i].valveIndex)!==i)
+        return fail(`Sensor ${i+1} must be paired with valve ${i+1}.`);
+      const target=Number(plants[i].targetLow);
+      if(!Number.isFinite(target)||target<1||target>100)return fail(`Invalid moisture percentage for Sensor ${i+1}.`);
+    }
+    const statements=plants.map((p,i)=>env.DB.prepare(
+      "INSERT INTO device_configs(device_id,plant_index,config_json,updated_at) VALUES(?,?,?,?) ON CONFLICT(device_id,plant_index) DO UPDATE SET config_json=excluded.config_json,updated_at=excluded.updated_at"
+    ).bind(deviceId,i,JSON.stringify({...p,sensorCount,valveCount}),now()));
+    await env.DB.batch(statements);
+    await audit(env,access.customer.id,deviceId,"customer_hardware_setup_saved",{sensorCount,valveCount});
+    return json({ok:true,sensorCount,valveCount,pairs:plants.length});
+  }
   const configMatch=path.match(/^config\/plants\/(\d+)$/);
   if(configMatch){
     const i=Number(configMatch[1]); if(i<0||!Number.isSafeInteger(i))return fail("Invalid plant index.");
