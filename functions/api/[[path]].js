@@ -1,5 +1,8 @@
 const DEVICE_RE = /^ESPBOARD-[A-F0-9]{6}$/;
-const TOKEN_TTL_MS = 15 * 60 * 1000;
+// Product activation QR codes are intentionally persistent until claimed.
+// The token is single-use; there is no time-based expiry because products may
+// remain in factory inventory or transit for an extended period.
+const FACTORY_PENDING_SECRET_HASH = "9d7f4c2a8b1e6f03d5c9a7b4e2f1c8d6a0b3e5f7c9d1a4b6e8f0c2d4a6b8e1f3";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PBKDF2_ITERATIONS = 100000;
 
@@ -153,15 +156,21 @@ async function adminAudit(request, env) {
 
 async function adminRegisterDevice(body, request, env) {
   const a=await superAdminRequired(request,env); if(a.error)return a.error;
-  const deviceId=normalizeDeviceId(body.deviceId), secret=String(body.deviceSecret||"");
-  if(!DEVICE_RE.test(deviceId)||secret.length<32)return fail("Valid Device ID and a 32+ character device secret are required.");
-  const hash=await sha256Hex(secret), t=now();
-  const existing=await env.DB.prepare("SELECT device_id,device_secret_hash FROM devices WHERE device_id=?").bind(deviceId).first();
-  if(existing && existing.device_secret_hash!==hash)return fail("Device already exists with a different secret.",409);
-  if(!existing)await env.DB.prepare("INSERT INTO devices(device_id,device_secret_hash,created_at,updated_at,last_seen_at) VALUES(?,?,?,?,?)").bind(deviceId,hash,t,t,t).run();
-  else await env.DB.prepare("UPDATE devices SET updated_at=? WHERE device_id=?").bind(t,deviceId).run();
-  await writeAdminAudit(env,a.admin.id,deviceId,"admin_device_registered",{source:"superadmin"});
-  return json({ok:true,deviceId,created:!existing},existing?200:201);
+  const deviceId=normalizeDeviceId(body.deviceId);
+  if(!DEVICE_RE.test(deviceId))return fail("Invalid Device ID. Expected ESPBOARD-XXXXXX.");
+  const t=now();
+  const existing=await env.DB.prepare("SELECT device_id,device_secret_hash,owner_customer_id FROM devices WHERE device_id=?").bind(deviceId).first();
+  if(existing){
+    await writeAdminAudit(env,a.admin.id,deviceId,"admin_device_prepared",{source:"superadmin",existing:true});
+    return json({ok:true,deviceId,created:false,ready:true,claimed:!!existing.owner_customer_id});
+  }
+  // Reserve the Device ID without asking the factory to handle the ESP32 secret.
+  // When the real ESP32 first connects, /device/register replaces this sentinel
+  // with the random secret generated and stored by that physical board.
+  await env.DB.prepare("INSERT INTO devices(device_id,device_secret_hash,created_at,updated_at,last_seen_at) VALUES(?,?,?,?,?)")
+    .bind(deviceId,FACTORY_PENDING_SECRET_HASH,t,t,t).run();
+  await writeAdminAudit(env,a.admin.id,deviceId,"admin_device_prepared",{source:"superadmin",existing:false});
+  return json({ok:true,deviceId,created:true,ready:true},201);
 }
 
 async function adminCreateEnrollment(body, request, env) {
@@ -173,10 +182,13 @@ async function adminCreateEnrollment(body, request, env) {
   if(device.disabled)return fail("This device is disabled.",403);
   if(device.owner_customer_id)return fail("This device is already claimed.",409);
   const token=randomToken(32),t=now(),hash=await sha256Hex(token);
+  // expires_at is kept for schema compatibility, but activation validity is
+  // controlled only by status/used_at. The QR therefore remains valid until
+  // the product is activated, even if it stays in inventory for months.
   await env.DB.prepare("INSERT INTO enrollment_tokens(device_id,token_hash,issued_at,expires_at,status) VALUES(?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET token_hash=excluded.token_hash,issued_at=excluded.issued_at,expires_at=excluded.expires_at,used_at=NULL,used_by_customer_id=NULL,status='issued'")
-    .bind(deviceId,hash,t,t+TOKEN_TTL_MS,"issued").run();
-  await writeAdminAudit(env,a.admin.id,deviceId,"enrollment_qr_generated",{expiresAt:t+TOKEN_TTL_MS});
-  return json({deviceId,token,expiresAt:t+TOKEN_TTL_MS,expiresInSeconds:TOKEN_TTL_MS/1000});
+    .bind(deviceId,hash,t,null,"issued").run();
+  await writeAdminAudit(env,a.admin.id,deviceId,"product_activation_qr_generated",{persistent:true});
+  return json({deviceId,token,persistent:true});
 }
 
 async function adminSetDevice(body, request, env) {
@@ -313,11 +325,11 @@ async function claimEnrollment(body, request, env) {
   // or consume the winner's token.
   const result = await env.DB.batch([
     env.DB.prepare(
-      "UPDATE devices SET owner_customer_id=?,updated_at=? WHERE device_id=? AND disabled=0 AND owner_customer_id IS NULL AND EXISTS (SELECT 1 FROM enrollment_tokens WHERE device_id=? AND token_hash=? AND status='issued' AND used_at IS NULL AND expires_at>?)"
-    ).bind(customer.id, t, deviceId, deviceId, tokenHash, t),
+      "UPDATE devices SET owner_customer_id=?,updated_at=? WHERE device_id=? AND disabled=0 AND owner_customer_id IS NULL AND EXISTS (SELECT 1 FROM enrollment_tokens WHERE device_id=? AND token_hash=? AND status='issued' AND used_at IS NULL)"
+    ).bind(customer.id, t, deviceId, deviceId, tokenHash),
     env.DB.prepare(
-      "UPDATE enrollment_tokens SET status='claimed',used_at=?,used_by_customer_id=? WHERE device_id=? AND token_hash=? AND status='issued' AND used_at IS NULL AND expires_at>? AND EXISTS (SELECT 1 FROM devices WHERE device_id=? AND owner_customer_id=?)"
-    ).bind(t, customer.id, deviceId, tokenHash, t, deviceId, customer.id)
+      "UPDATE enrollment_tokens SET status='claimed',used_at=?,used_by_customer_id=? WHERE device_id=? AND token_hash=? AND status='issued' AND used_at IS NULL AND EXISTS (SELECT 1 FROM devices WHERE device_id=? AND owner_customer_id=?)"
+    ).bind(t, customer.id, deviceId, tokenHash, deviceId, customer.id)
   ]);
 
   const deviceChanges = Number(result?.[0]?.meta?.changes || 0);
@@ -338,9 +350,15 @@ async function deviceRegister(body, env) {
   if(!DEVICE_RE.test(deviceId)||secret.length<32) return fail("Invalid device registration.",400);
   const hash=await sha256Hex(secret), t=now();
   const existing=await env.DB.prepare("SELECT * FROM devices WHERE device_id=? LIMIT 1").bind(deviceId).first();
-  if (existing && existing.device_secret_hash !== hash) return fail("Device identity conflict.",409);
+  if (existing && existing.device_secret_hash !== hash && existing.device_secret_hash !== FACTORY_PENDING_SECRET_HASH) return fail("Device identity conflict.",409);
   if (!existing) {
+    // Normally the factory prepares the Device ID first. This fallback keeps
+    // direct firmware provisioning compatible for devices that were not prepared.
     await env.DB.prepare("INSERT INTO devices(device_id,device_secret_hash,created_at,updated_at,last_seen_at) VALUES(?,?,?,?,?)").bind(deviceId,hash,t,t,t).run();
+  } else if (existing.device_secret_hash === FACTORY_PENDING_SECRET_HASH && !existing.owner_customer_id) {
+    // Bind the reserved record to the secret generated by this physical ESP32.
+    await env.DB.prepare("UPDATE devices SET device_secret_hash=?,updated_at=?,last_seen_at=? WHERE device_id=? AND device_secret_hash=? AND owner_customer_id IS NULL")
+      .bind(hash,t,t,deviceId,FACTORY_PENDING_SECRET_HASH).run();
   } else {
     await env.DB.prepare("UPDATE devices SET updated_at=?,last_seen_at=? WHERE device_id=?").bind(t,t,deviceId).run();
   }
