@@ -16,8 +16,8 @@
 <section id="setupShell" class="auth-shell" hidden><div class="auth-card setup-card">
 <p class="eyebrow">Plant Life Care V3</p><h1>Set up your plants</h1>
 <p id="setupHint" class="subtitle">Your device is activated. Complete this setup before opening the dashboard.</p>
-<div id="sensorStep"><h2>How many sensors?</h2><label>Number of sensors<input id="sensorCount" type="number" min="1" max="5" inputmode="numeric" placeholder="e.g. 3"></label><button id="sensorNextBtn">Next</button></div>
-<div id="plantStep" hidden><h2>Plant details</h2><p class="subtitle">Enter the name and desired moisture percentage for each sensor.</p><div id="plantSetupList"></div><div class="actions"><button id="plantBackBtn" class="secondary">Back</button><button id="finishSetupBtn">Finish Setup</button></div></div>
+<div id="sensorStep"><h2>Hardware setup</h2><label>How many sensors do you have?<input id="sensorCount" type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 8"></label><label>How many valves do you have?<input id="valveCount" type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 8"></label><p class="subtitle">For automatic watering, the number of sensors must match the number of valves.</p><button id="sensorNextBtn">Next</button></div>
+<div id="plantStep" hidden><h2>Plant details</h2><p class="subtitle">Enter the plant name and desired moisture percentage for each sensor/valve pair.</p><div id="plantSetupList"></div><div class="actions"><button id="plantBackBtn" class="secondary">Back</button><button id="finishSetupBtn">Finish Setup</button></div></div>
 <p id="setupStatus" class="auth-status"></p><p id="setupError" class="auth-error" hidden></p>
 </div></section>
 
