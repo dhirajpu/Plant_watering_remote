@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Plant Life Care V3 - Secure Device QR</title><link rel="stylesheet" href="./styles.css"></head>
+<title>Plant Life Care V3 - Secure Device QR</title><link rel="stylesheet" href="./styles.css"><script src="./config.js"></script></head>
 <body><main class="page"><section class="auth-shell"><div class="auth-card">
 <p class="eyebrow">Plant Life Care V3</p><h1>Secure Device QR</h1>
 <p class="subtitle">Generate a short-lived, one-time enrollment QR for a physical ESPBOARD controller.</p>
@@ -15,7 +15,7 @@
 </div></section></main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
-const FUNCTIONS_BASE='https://asia-southeast1-vernal-catfish-196407.cloudfunctions.net/';
+const FUNCTIONS_BASE=(window.PLANT_V3_CONFIG.functionsBaseUrl||'').replace(/\/$/,'')+'/';
 document.getElementById('make').onclick=async()=>{
   const id=document.getElementById('deviceId').value.trim().toUpperCase();
   const key=document.getElementById('adminKey').value;
