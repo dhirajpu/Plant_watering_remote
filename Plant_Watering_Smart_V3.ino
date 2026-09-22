@@ -232,9 +232,9 @@ String provisioningPage(const String &message=""){
   return page;
 }
 void setupProvisioningRoutes(){
-  server.on("/",HTTP_GET,[](){server.send(200,"text/html",provisioningPage());});
-  server.on("/wifi",HTTP_GET,[](){server.send(200,"text/html",provisioningPage());});
-  server.on("/wifi/scan",HTTP_GET,[](){
+  server.on("/",HTTP_GET,[]{if(!provisioningMode){server.send(403,"text/plain","Wi-Fi provisioning is disabled while the device is connected. Use the authenticated product dashboard.");return;}server.send(200,"text/html",provisioningPage());});
+  server.on("/wifi",HTTP_GET,[]{if(!provisioningMode){server.send(403,"text/plain","Wi-Fi provisioning is disabled while the device is connected. Use the authenticated product dashboard.");return;}server.send(200,"text/html",provisioningPage());});
+  server.on("/wifi/scan",HTTP_GET,[]{if(!provisioningMode){server.send(403,"text/plain","Provisioning mode is not active.");return;}
     int n=WiFi.scanNetworks(false,true);
     String out="[";
     for(int i=0;i<n;i++){
@@ -244,7 +244,7 @@ void setupProvisioningRoutes(){
     }
     out+="]";WiFi.scanDelete();server.send(200,"application/json",out);
   });
-  server.on("/wifi/connect",HTTP_POST,[](){
+  server.on("/wifi/connect",HTTP_POST,[]{if(!provisioningMode){server.send(403,"text/plain","Provisioning mode is not active.");return;}
     String ssid=server.arg("ssid"),password=server.arg("password");
     if(ssid.length()<1||ssid.length()>64||password.length()>63){server.send(400,"text/plain","Invalid Wi-Fi credentials.");return;}
     bool wasProvisioning=provisioningMode;
@@ -437,7 +437,7 @@ void handleSecurity(){
 
 void handleCommand(){
   String b;if(!httpGet("/command",b)||b.length()<2||b=="null")return;String id=jsonValue(b,"id");if(!id.length()||id==lastCommandId)return;String action=jsonValue(b,"action");String authToken=jsonValue(b,"authToken");int p=(int)jsonLong(b,"plantIndex",-1);
-  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet"||action=="set_config"||action=="change_password";
+  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet"||action=="set_config"||action=="change_password"||action=="start_wifi_provisioning";
   long issuedSec=jsonLong(b,"issuedAtEpochSec",0);
   if(issuedSec<=0){long legacyMs=jsonLong(b,"issuedAtEpochMs",0);if(legacyMs>0)issuedSec=legacyMs/1000L;}
   bool valid=true;
@@ -452,7 +452,7 @@ void handleCommand(){
   else if(action=="calibrate_dry"&&p>=0&&p<NUM_PLANTS){plants[p].airRaw=states[p].raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="dry_recorded";}
   else if(action=="calibrate_wet"&&p>=0&&p<NUM_PLANTS){plants[p].wetRaw=states[p].raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="wet_recorded";}
   else if(action=="set_config"&&p>=0&&p<NUM_PLANTS){String n=jsonValue(b,"name"),m=jsonValue(b,"mode");if(n.length())plants[p].name=n;plants[p].targetLow=constrain((int)jsonLong(b,"targetLow",plants[p].targetLow),0,95);plants[p].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[p].targetHigh),plants[p].targetLow+1,100);plants[p].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[p].burstMs),1000UL,plants[p].maxBurstMs);plants[p].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[p].soakMs/1000UL),10UL,1800UL)*1000UL;plants[p].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[p].minIntervalMs/60000UL),1UL,1440UL)*60000UL;if(m.length())plants[p].mode=parseMode(m);savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));httpPut("/config/version",String(millis()));result="config_set";}
-  else if(action=="change_password"){String newSalt=jsonValue(b,"newSalt"),newHash=jsonValue(b,"newHash");if(newSalt.length()>=16&&newSalt.length()<=64&&newHash.length()==64){prefs.begin("security",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();controlSalt=newSalt;controlPasswordHash=newHash;result="password_changed";}else result="invalid_password_data";}
+  else if(action=="start_wifi_provisioning"){startProvisioningAP();result="provisioning_started";}\n  else if(action=="change_password"){String newSalt=jsonValue(b,"newSalt"),newHash=jsonValue(b,"newHash");if(newSalt.length()>=16&&newSalt.length()<=64&&newHash.length()==64){prefs.begin("security",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();controlSalt=newSalt;controlPasswordHash=newHash;result="password_changed";}else result="invalid_password_data";}
   if(action=="water_now"&&p>=0&&p<NUM_PLANTS&&result=="queued")startSession(p,true,states[p].manualRequestedMs);
   String ack="{\"id\":\""+safetyName(id)+"\",\"action\":\""+safetyName(action)+"\",\"result\":\""+safetyName(result)+"\",\"handledAtMs\":"+String(millis())+"}";httpPut("/commandAck",ack);lastCommandId=id;
 }
