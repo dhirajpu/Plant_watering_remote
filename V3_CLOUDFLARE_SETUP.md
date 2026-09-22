@@ -6,18 +6,18 @@ V3 is migrated from Firebase to Cloudflare Pages Functions + one Cloudflare D1 d
 
 - Web app: `/v3/` on Cloudflare Pages.
 - API/Workers runtime: Cloudflare Pages Functions under `/functions/api/[[path]].js`.
-- Database: one D1 database named `plantCareMainDB`.
+- Database: one D1 database named `plantcaremaindb`.
 - Database schema: `migrations/0001_initial_schema.sql`.
 - Customers, devices, ownership, enrollment tokens, telemetry, watering history, commands, security state and audit logs are stored in the same D1 database.
 - Each ESP32 is a device row identified by `ESPBOARD-XXXXXX`; devices are never separate databases.
 
 ## Cloudflare setup
 
-1. Create exactly one D1 database named `plantCareMainDB`.
-2. In the Pages project, go to **Settings → Bindings → Add → D1 database**, set variable name to `DB`, select `plantCareMainDB`, and redeploy. Cloudflare documents D1 bindings for Pages Functions here: https://developers.cloudflare.com/pages/functions/bindings/
+1. Create exactly one D1 database named `plantcaremaindb`.
+2. The repository `wrangler.jsonc` defines the D1 binding as `DB` using the production database ID. If the Cloudflare dashboard also asks for a binding, use variable name `DB` and select `plantcaremaindb`.
 3. Add a production secret named `FACTORY_ENROLLMENT_KEY`. Do not put the real value in GitHub.
 4. Apply the migration once to the remote database:
-   `npx wrangler d1 migrations apply plantCareMainDB --remote`
+   `npx wrangler d1 migrations apply plantcaremaindb --remote`
 5. In Pages build settings use **Build command:** `exit 0` and **Build output directory:** `v3`. The Functions directory remains at repository root (`/functions`).
 6. Set the Pages production branch to the branch you use for production (normally `main`).
 7. Deploy the Pages project. The public V3 application will be at the Pages site root, for example `https://<project>.pages.dev/`, and the factory QR page will be `/qr.html`.
