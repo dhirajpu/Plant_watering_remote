@@ -1,81 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Plant Life Care V3</title>
-  <link rel="icon" type="image/svg+xml" href="./plant-icon.svg">
-  <link rel="stylesheet" href="./styles.css">
-  <link rel="stylesheet" href="./enhancements.css">
-</head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plant Life Care V3</title><link rel="icon" type="image/svg+xml" href="./plant-icon.svg"><link rel="stylesheet" href="./styles.css"><link rel="stylesheet" href="./enhancements.css"></head>
 <body>
-  <main class="page">
-    <section class="shell">
-      <header class="hero">
-        <div>
-          <p class="eyebrow">Smart Watering V3</p>
-          <h1>Plant Life Care</h1>
-          <p class="subtitle">Live monitoring and safe watering controls. Open History or Diagnostics only when you need them.</p>
-        </div>
-        <div class="hero-actions">
-          <span id="systemBadge" class="badge neutral">WAITING</span>
-          <button id="emergencyBtn" class="danger">Emergency Stop</button>
-          <button id="resumeBtn" class="secondary" hidden>Resume System</button>
-        </div>
-      </header>
+<main class="page">
+<section id="authShell" class="auth-shell"><div class="auth-card">
+<p class="eyebrow">Plant Life Care V3</p><h1>Customer Account</h1>
+<p id="claimHint" class="subtitle">Sign in or register to connect your smart watering controller.</p>
+<div id="registerForm"><h2>Create customer account</h2><label>Name<input id="customerName" autocomplete="name"></label><label>Email<input id="customerEmail" type="email" autocomplete="email"></label><label>Password<input id="customerPassword" type="password" autocomplete="new-password"></label><button id="registerBtn">Register & Continue</button><button id="showLogin" class="secondary">Already have an account? Sign in</button></div>
+<div id="loginForm" hidden><h2>Sign in</h2><label>Email<input id="loginEmail" type="email" autocomplete="email"></label><label>Password<input id="loginPassword" type="password" autocomplete="current-password"></label><button id="loginBtn">Sign in</button><button id="showRegister" class="secondary">Create a customer account</button></div>
+<div class="claim-box"><strong>Device QR</strong><p>Scan the QR from your device box, or enter the Device ID below.</p><input id="claimDevice" placeholder="PLANT-A1B2C3" autocomplete="off"><button id="claimBtn" class="secondary">Claim Device</button></div>
+<p id="authStatus" class="auth-status"></p><p id="authError" class="auth-error" hidden></p><button id="logoutLink" class="text-button">Sign out</button>
+</div></section>
 
-      <nav class="dashboard-menu" aria-label="Dashboard sections">
-        <button class="menu-btn active" data-view="overview">Overview</button>
-        <button class="menu-btn" data-view="historyView">History</button>
-        <button class="menu-btn" data-view="diagnosticsView">Diagnostics</button>
-      </nav>
-
-      <div id="overview" class="dashboard-view active">
-        <section class="summary-grid">
-          <article class="summary-card"><span>System</span><strong id="systemStatus">Waiting...</strong><small id="heartbeat">No heartbeat yet</small></article>
-          <article class="summary-card"><span>Pump / Active Plant</span><strong id="activePlant">--</strong><small id="wateringAllowed">--</small></article>
-          <article class="summary-card weather-summary"><span>🌦️ Bengaluru Weather</span><strong id="weatherStatus">--</strong><small id="weatherHint">--</small></article>
-          <article class="summary-card"><span>Wi-Fi</span><strong id="wifiRssi">--</strong><small id="deviceIp">--</small></article>
-          <article class="summary-card"><span>Restart</span><strong id="resetReason">--</strong><small id="uptime">--</small></article>
-        </section>
-
-        <section class="section">
-          <div class="section-head"><div><h2>Plants</h2><p>Each plant can run in AUTO, MANUAL or DISABLED mode. Settings stay collapsed until opened.</p></div></div>
-          <div id="plantsGrid" class="plants-grid"><div class="empty">Waiting for V3 controller data...</div></div>
-        </section>
-      </div>
-
-      <div id="historyView" class="dashboard-view">
-        <section class="section split">
-          <div>
-            <div class="section-head"><div><h2>Moisture History</h2><p>Recent telemetry from the V3 controller.</p></div></div>
-            <div id="chart" class="chart"><div class="empty">No telemetry yet.</div></div>
-          </div>
-          <div>
-            <div class="section-head"><div><h2>Watering History</h2><p>Latest watering sessions and results.</p></div></div>
-            <div id="history" class="history"><div class="empty">No watering history yet.</div></div>
-            <div class="section-head connectivity-head"><div><h2>Connectivity History</h2><p>Wi-Fi events are buffered locally when the network is unavailable and uploaded after reconnection.</p></div></div>
-            <div id="connectivityHistory" class="history"><div class="empty">No connectivity events yet.</div></div>
-          </div>
-        </section>
-      </div>
-
-      <div id="diagnosticsView" class="dashboard-view">
-        <section class="section diagnostics">
-          <div class="section-head"><div><h2>Diagnostics</h2><p>Open this page when checking power-return, sensors, Wi-Fi or safety state.</p></div></div>
-          <div id="diagnosticsGrid" class="diagnostics-grid"></div>
-        </section>
-        <section class="section ota-panel">
-          <div class="section-head"><div><h2>Firmware Update</h2><p>Wireless update is available when this controller is on your local Wi-Fi network.</p></div></div>
-          <div id="otaPanel" class="ota-card"><strong>Waiting for controller...</strong><p>The controller IP will appear here when V3 is online.</p></div>
-        </section>
-      </div>
-
-      <div id="toast" class="toast" hidden></div>
-    </section>
-  </main>
-  <script src="./config.js"></script>
-  <script>document.write('<script src="./app.js?v=' + Date.now() + '"><\/script>');</script>
-  <script src="./enhancements.js"></script>
-</body>
-</html>
+<section id="customerApp" hidden><div class="customer-bar"><div><strong>Customer</strong><span id="customerUser"></span></div><div><strong>Device</strong><span id="customerDevice"></span></div><div id="customerActions" class="actions"></div></div>
+<section class="shell">
+<header class="hero"><div><p class="eyebrow">Smart Watering V3</p><h1>Plant Life Care</h1><p class="subtitle">Live monitoring and safe watering controls.</p></div><div class="hero-actions"><span id="systemBadge" class="badge neutral">WAITING</span><button id="emergencyBtn" class="danger">Emergency Stop</button><button id="resumeBtn" class="secondary" hidden>Resume System</button></div></header>
+<nav class="dashboard-menu" aria-label="Dashboard sections"><button class="menu-btn active" data-view="overview">Overview</button><button class="menu-btn" data-view="historyView">History</button><button class="menu-btn" data-view="diagnosticsView">Diagnostics</button></nav>
+<div id="overview" class="dashboard-view active"><section class="summary-grid"><article class="summary-card"><span>System</span><strong id="systemStatus">Waiting...</strong><small id="heartbeat">No heartbeat yet</small></article><article class="summary-card"><span>Pump / Active Plant</span><strong id="activePlant">--</strong><small id="wateringAllowed">--</small></article><article class="summary-card weather-summary"><span>🌦️ Bengaluru Weather</span><strong id="weatherStatus">--</strong><small id="weatherHint">--</small></article><article class="summary-card"><span>Wi-Fi</span><strong id="wifiRssi">--</strong><small id="deviceIp">--</small></article><article class="summary-card"><span>Restart</span><strong id="resetReason">--</strong><small id="uptime">--</small></article></section><section class="section"><div class="section-head"><div><h2>Plants</h2><p>Each plant can run in AUTO, MANUAL or DISABLED mode.</p></div></div><div id="plantsGrid" class="plants-grid"><div class="empty">Waiting for V3 controller data...</div></div></section></div>
+<div id="historyView" class="dashboard-view"><section class="section split"><div><div class="section-head"><div><h2>Moisture History</h2><p>Recent telemetry from the V3 controller.</p></div></div><div id="chart" class="chart"><div class="empty">No telemetry yet.</div></div></div><div><div class="section-head"><div><h2>Watering History</h2><p>Latest watering sessions and results.</p></div></div><div id="history" class="history"><div class="empty">No watering history yet.</div></div><div class="section-head connectivity-head"><div><h2>Connectivity History</h2><p>Wi-Fi events are buffered locally when the network is unavailable and uploaded after reconnection.</p></div></div><div id="connectivityHistory" class="history"><div class="empty">No connectivity events yet.</div></div></div></section></div>
+<div id="diagnosticsView" class="dashboard-view"><section class="section diagnostics"><div class="section-head"><div><h2>Diagnostics</h2><p>Device diagnostics and safety state.</p></div></div><div id="diagnosticsGrid" class="diagnostics-grid"></div></section><section class="section ota-panel"><div class="section-head"><div><h2>Firmware Update</h2><p>Wireless update is available when the controller is on local Wi-Fi.</p></div></div><div id="otaPanel" class="ota-card"><strong>Waiting for controller...</strong></div></section></div><div id="toast" class="toast" hidden></div>
+</section></section></main>
+<script src="./config.js"></script><script src="./auth.js"></script><script src="./enhancements.js"></script>
+</body></html>
