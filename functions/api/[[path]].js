@@ -100,8 +100,10 @@ async function createEnrollment(body, request, env) {
   const supplied = String(body.factoryKey || request.headers.get("X-Factory-Key") || "");
   if (!DEVICE_RE.test(deviceId)) return fail("Invalid Device ID. Expected ESPBOARD-XXXXXX.");
   if (!env.FACTORY_ENROLLMENT_KEY || supplied !== env.FACTORY_ENROLLMENT_KEY) return fail("Invalid factory enrollment key.", 403);
-  const device = await env.DB.prepare("SELECT device_id,owner_customer_id FROM devices WHERE device_id=? LIMIT 1").bind(deviceId).first();
-  if (device?.owner_customer_id) return fail("This device is already claimed.", 409);
+  const device = await env.DB.prepare("SELECT device_id,owner_customer_id,disabled FROM devices WHERE device_id=? LIMIT 1").bind(deviceId).first();
+  if (!device) return fail("Device is not registered yet. Connect the controller to Wi-Fi so it can register before generating its QR.", 404);
+  if (device.disabled) return fail("This device is disabled.", 403);
+  if (device.owner_customer_id) return fail("This device is already claimed.", 409);
   const token = randomToken(32), t = now(), hash = await sha256Hex(token);
   await env.DB.prepare(
     "INSERT INTO enrollment_tokens(device_id,token_hash,issued_at,expires_at,status) VALUES(?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET token_hash=excluded.token_hash,issued_at=excluded.issued_at,expires_at=excluded.expires_at,used_at=NULL,used_by_customer_id=NULL,status='issued'"
