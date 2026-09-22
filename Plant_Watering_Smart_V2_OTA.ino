@@ -267,7 +267,7 @@ void handleCommand(){
   else if(action=="clear_fault"&&p>=0&&p<NUM_PLANTS){states[p].waterResponseFault=false;if(states[p].sensorFault&&states[p].raw>=SENSOR_MIN_VALID&&states[p].raw<=SENSOR_MAX_VALID)states[p].sensorFault=false;if(!states[p].sensorFault){clearFaultReason(p);states[p].lastStopReason=STOP_NONE;}result="fault_cleared";}
   else if(action=="calibrate_dry"&&p>=0&&p<NUM_PLANTS){plants[p].airRaw=states[p].raw;result="dry_recorded";}
   else if(action=="calibrate_wet"&&p>=0&&p<NUM_PLANTS){plants[p].wetRaw=states[p].raw;result="wet_recorded";}
-  else if(action=="change_password"){String newSalt=jsonValue(b,"newSalt"),newHash=jsonValue(b,"newHash");if(newSalt.length()>=16&&newSalt.length()<=64&&newHash.length()==64){prefs.begin("security",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();controlSalt=newSalt;controlPasswordHash=newHash;controlSessionToken=randomHex(32);controlSessionExpiresMs=millis()+CONTROL_SESSION_MS;result="password_changed";}else result="invalid_password_data";}
+  else if(action=="change_password"){String newSalt=jsonValue(b,"newSalt"),newHash=jsonValue(b,"newHash");if(newSalt.length()>=16&&newSalt.length()<=64&&newHash.length()==64){prefs.begin("security",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();controlSalt=newSalt;controlPasswordHash=newHash;result="password_changed";}else result="invalid_password_data";}
   if(action=="water_now"&&p>=0&&p<NUM_PLANTS&&result=="queued")startSession(p,true,states[p].manualRequestedMs);
   String ack="{\"id\":\""+safetyName(id)+"\",\"action\":\""+safetyName(action)+"\",\"result\":\""+safetyName(result)+"\",\"handledAtMs\":"+String(millis())+"}";httpPut("/commandAck",ack);lastCommandId=id;
 }
