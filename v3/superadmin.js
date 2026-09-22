@@ -52,7 +52,41 @@
   window.adminSupportCommand=async(deviceId,action)=>{if(!confirm(action==="emergency_stop"?"Send Emergency Stop to this controller?":"Send "+action+" to this controller?"))return;try{await api("/superadmin/device/command",{method:"POST",body:JSON.stringify({deviceId,action,supportSessionId:supportSessions[deviceId],extra:{}})});toast("Command sent to controller.");loadAudit()}catch(e){toast(e.message)}};
   $("registerDeviceBtn").onclick=async()=>{msg("registerStatus","Preparing device…");try{const id=$("regDeviceId").value.trim().toUpperCase();if(!id||!/^ESPBOARD-[A-F0-9]{6}$/.test(id)){msg("registerStatus","Enter a valid Device ID such as ESPBOARD-A1B2C3.",true);return}const j=await api("/superadmin/device/register",{method:"POST",body:JSON.stringify({deviceId:id})});await loadDevices();$("qrDevice").value=id;msg("registerStatus",j.created?"Device prepared successfully. Generate the product activation QR now.":"Device is already prepared. You can generate the product activation QR.")}catch(e){msg("registerStatus",e.message,true)}};
   $("generateQrBtn").onclick=async()=>{msg("qrStatus","Generating product activation QR…");$("qrResult").hidden=true;try{const j=await api("/superadmin/enrollment/create",{method:"POST",body:JSON.stringify({deviceId:$("qrDevice").value})});const url=new URL("/index.html",location.origin);url.hash=new URLSearchParams({device:j.deviceId,enroll:j.token}).toString();$("qr").innerHTML="";new QRCode($("qr"),{text:url.href,width:280,height:280});$("qrText").textContent=j.deviceId;$("qrResult").hidden=false;$("qrCountdown").textContent="Permanent activation QR — valid until the product is activated.";msg("qrStatus","Product activation QR generated successfully.");loadDevices()}catch(e){msg("qrStatus",e.message,true)}};
-  $("printQrBtn").onclick=()=>window.print();
+  $("printQrBtn").onclick=()=>{
+    const qr=$("qr");
+    if(!qr||!qr.innerHTML.trim()){msg("qrStatus","Generate the activation QR before printing.",true);return}
+    const printWindow=window.open("","_blank","width=720,height=900");
+    if(!printWindow){msg("qrStatus","Please allow pop-ups for printing the activation QR.",true);return}
+    const deviceId=esc($("qrText").textContent||"");
+    const qrMarkup=qr.innerHTML;
+    printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Plant Life Care - Product Activation</title><style>
+      *{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;padding:32px;color:#111;text-align:center}
+      .sheet{max-width:620px;margin:0 auto;border:2px solid #222;border-radius:16px;padding:28px}
+      h1{font-size:24px;margin:0 0 6px}h2{font-size:17px;margin:24px 0 10px;text-align:left}
+      .subtitle{margin:0 0 18px;color:#555;font-size:13px}.device{font-size:16px;font-weight:700;margin:14px 0}
+      .qr{display:flex;justify-content:center;margin:18px 0}.qr img,.qr canvas{width:280px!important;height:280px!important}
+      ol{text-align:left;margin:8px 0 0;padding-left:24px;font-size:14px;line-height:1.7}
+      .note{text-align:left;margin-top:18px;padding:12px;background:#f3f3f3;border-radius:8px;font-size:12px;line-height:1.5}
+      @media print{body{padding:0}.sheet{border:0;margin:0 auto}}
+    </style></head><body><div class="sheet">
+      <h1>Plant Life Care</h1>
+      <p class="subtitle">Product Activation</p>
+      <div class="device">Device ID: ${deviceId}</div>
+      <div class="qr">${qrMarkup}</div>
+      <h2>Activation Steps</h2>
+      <ol>
+        <li>Open the Plant Life Care app.</li>
+        <li>Scan this Product Activation QR code.</li>
+        <li>Register or sign in to your customer account.</li>
+        <li>Confirm activation for the displayed Device ID.</li>
+        <li>After activation, this QR code cannot be used again.</li>
+      </ol>
+      <div class="note"><strong>Important:</strong> Keep this QR code with the product until the customer completes activation. It is single-use and remains valid until it is activated.</div>
+    </div></body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(()=>{printWindow.print();printWindow.close()},250);
+  };
   document.querySelectorAll(".admin-nav button").forEach(b=>b.onclick=async()=>{document.querySelectorAll(".admin-nav button").forEach(x=>x.classList.toggle("active",x===b));document.querySelectorAll(".admin-view").forEach(x=>x.classList.toggle("active",x.id===b.dataset.view));if(b.dataset.view==="devices")await loadDevices();if(b.dataset.view==="customers")await loadCustomers();if(b.dataset.view==="maintenance")await loadMaintenance();if(b.dataset.view==="support")await loadSupport();if(b.dataset.view==="audit")await loadAudit()});
   $("logoutBtn").onclick=()=>{clear();location.reload()};$("refreshDevices").onclick=loadDevices;$("refreshCustomers").onclick=loadCustomers;$("refreshMaintenance").onclick=loadMaintenance;$("refreshAudit").onclick=loadAudit;$("loginBtn").onclick=login;
   async function boot(){load();if(!session){$("loginShell").hidden=false;return}try{const m=await api("/superadmin/me");session.admin=m.admin;save();showApp()}catch{clear();$("loginShell").hidden=false}}
