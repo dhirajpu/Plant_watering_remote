@@ -1,13 +1,15 @@
 <!-- Cloudflare deployment verification marker: keeps Workers Builds aligned with the V3 migration branch. -->
 # Plant Life Care V3 — Cloudflare Deployment
 
-V3 is migrated from Firebase to Cloudflare Pages Functions + one Cloudflare D1 database.
+V3 is deployed as one Cloudflare Worker application with static assets, Worker API routes, and one Cloudflare D1 database. This matches the current Cloudflare Workers Builds application connected to GitHub.
 
 ## Production architecture
 
-- Web app: `/v3/` on Cloudflare Pages.
-- API/Workers runtime: Cloudflare Pages Functions under `/functions/api/[[path]].js`.
+- Web app: `/v3/` is served as the Worker static asset bundle.
+- API runtime: `/api/*` is handled by `worker.js`, which adapts the existing API handler in `/functions/api/[[path]].js`.
 - Database: one D1 database named `plantcaremaindb`.
+- Database binding: `DB`.
+- Static asset binding: `ASSETS`.
 - Database schema: `migrations/0001_initial_schema.sql`.
 - Customers, devices, ownership, enrollment tokens, telemetry, watering history, commands, security state and audit logs are stored in the same D1 database.
 - Each ESP32 is a device row identified by `ESPBOARD-XXXXXX`; devices are never separate databases.
@@ -15,13 +17,18 @@ V3 is migrated from Firebase to Cloudflare Pages Functions + one Cloudflare D1 d
 ## Cloudflare setup
 
 1. Create exactly one D1 database named `plantcaremaindb`.
-2. The repository `wrangler.jsonc` defines the D1 binding as `DB` using the production database ID. If the Cloudflare dashboard also asks for a binding, use variable name `DB` and select `plantcaremaindb`.
+2. The repository `wrangler.jsonc` defines the production D1 binding as `DB` using the production database ID.
 3. Add a production secret named `FACTORY_ENROLLMENT_KEY`. Do not put the real value in GitHub.
 4. Apply the migration once to the remote database:
    `npx wrangler d1 migrations apply plantcaremaindb --remote`
-5. In Pages build settings use **Build command:** `exit 0` and **Build output directory:** `v3`. The Functions directory remains at repository root (`/functions`).
-6. Set the Pages production branch to the branch you use for production (normally `main`).
-7. Deploy the Pages project. The public V3 application will be at the Pages site root, for example `https://<project>.pages.dev/`, and the factory QR page will be `/qr.html`.
+5. In the connected Workers Builds application use:
+   - **Root directory:** `/`
+   - **Build command:** leave blank (or `exit 0` if the UI requires a command).
+   - **Deploy command:** `npx wrangler deploy`
+   - **Version command:** leave blank unless your Cloudflare setup specifically requires version uploads.
+   - **Production branch:** the branch you use for production (normally `main`).
+6. The Worker serves the V3 frontend from `/v3` and routes `/api/*` to the API handler.
+7. The public application is available at the Worker hostname configured in Cloudflare.
 
 ## Secure QR flow
 
@@ -46,4 +53,4 @@ Factory operator:
 
 ## Important
 
-The V3 firmware in this branch uses the Cloudflare API. Before flashing a device, replace `REPLACE_WITH_CLOUDFLARE_PAGES_DOMAIN` in `Plant_Watering_Smart_V3.ino` with the final Pages domain. Until the firmware migration is flashed and tested, do not treat the Cloudflare backend as production-ready.
+The V3 firmware in this branch uses the Cloudflare API. Before flashing a device, replace `REPLACE_WITH_CLOUDFLARE_PAGES_DOMAIN` in `Plant_Watering_Smart_V3.ino` with the final production Worker domain. The V3 firmware and physical ESP32 flow still require end-to-end testing before treating the system as production-ready.
