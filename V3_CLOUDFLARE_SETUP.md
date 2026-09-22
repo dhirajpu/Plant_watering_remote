@@ -1,3 +1,4 @@
+<!-- Cloudflare deployment verification marker: keeps Workers Builds aligned with the V3 migration branch. -->
 # Plant Life Care V3 — Cloudflare Deployment
 
 V3 is migrated from Firebase to Cloudflare Pages Functions + one Cloudflare D1 database.
