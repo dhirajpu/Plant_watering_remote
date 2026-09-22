@@ -1,7 +1,7 @@
 const DEVICE_RE = /^ESPBOARD-[A-F0-9]{6}$/;
 const TOKEN_TTL_MS = 15 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const PBKDF2_ITERATIONS = 120000;
+const PBKDF2_ITERATIONS = 100000;
 
 function json(data, status = 200, extra = {}) {
   return Response.json(data, { status, headers: { "Cache-Control": "no-store", ...extra } });
