@@ -6,7 +6,7 @@
   const C=window.PLANT_V3_CONFIG;
   const AUTH_BASE='https://identitytoolkit.googleapis.com/v1/accounts:';
   const REFRESH_URL='https://securetoken.googleapis.com/v1/token';
-  const FUNCTIONS_BASE='https://asia-southeast1-vernal-catfish-196407.cloudfunctions.net/';
+  const FUNCTIONS_BASE=(C.functionsBaseUrl||'').replace(/\/$/,'')+'/';
   const SESSION_KEY='plantV3CustomerSession';
   const state={session:null,loading:false};
 
