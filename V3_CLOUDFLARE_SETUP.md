@@ -14,13 +14,13 @@ V3 is migrated from Firebase to Cloudflare Pages Functions + one Cloudflare D1 d
 ## Cloudflare setup
 
 1. Create exactly one D1 database named `plantCareMainDB`.
-2. Copy the generated D1 database ID into `wrangler.jsonc` (replace the placeholder).
-3. In the Pages project, go to **Settings → Bindings → Add → D1 database**, set variable name to `DB`, select `plantCareMainDB`, and redeploy. Cloudflare documents D1 bindings for Pages Functions here: https://developers.cloudflare.com/pages/functions/bindings/
-4. Add a production secret/environment variable named `FACTORY_ENROLLMENT_KEY`. Do not put the real value in GitHub. The placeholder in `wrangler.jsonc` is not a production secret.
-5. Apply the migration once to the remote database:
+2. In the Pages project, go to **Settings → Bindings → Add → D1 database**, set variable name to `DB`, select `plantCareMainDB`, and redeploy. Cloudflare documents D1 bindings for Pages Functions here: https://developers.cloudflare.com/pages/functions/bindings/
+3. Add a production secret named `FACTORY_ENROLLMENT_KEY`. Do not put the real value in GitHub.
+4. Apply the migration once to the remote database:
    `npx wrangler d1 migrations apply plantCareMainDB --remote`
-6. Connect the GitHub repository to Pages. Use the repository root as the Pages output directory because the V3 static site is in `/v3` and the Pages Function is in `/functions`.
-7. Deploy the Pages project. The public app will be `/v3/`.
+5. In Pages build settings use **Build command:** `exit 0` and **Build output directory:** `v3`. The Functions directory remains at repository root (`/functions`).
+6. Set the Pages production branch to the branch you use for production (normally `main`).
+7. Deploy the Pages project. The public V3 application will be at the Pages site root, for example `https://<project>.pages.dev/`, and the factory QR page will be `/qr.html`.
 
 ## Secure QR flow
 
@@ -45,4 +45,4 @@ Factory operator:
 
 ## Important
 
-The current V3 firmware is being migrated from direct Firebase REST calls to the Cloudflare API in this branch. Until the firmware migration is flashed and tested, do not treat the Cloudflare backend as production-ready.
+The V3 firmware in this branch uses the Cloudflare API. Before flashing a device, replace `REPLACE_WITH_CLOUDFLARE_PAGES_DOMAIN` in `Plant_Watering_Smart_V3.ino` with the final Pages domain. Until the firmware migration is flashed and tested, do not treat the Cloudflare backend as production-ready.
