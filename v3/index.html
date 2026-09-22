@@ -13,6 +13,14 @@
 <p id="authStatus" class="auth-status"></p><p id="authError" class="auth-error" hidden></p><button id="logoutLink" class="text-button">Sign out</button>
 </div></section>
 
+<section id="setupShell" class="auth-shell" hidden><div class="auth-card setup-card">
+<p class="eyebrow">Plant Life Care V3</p><h1>Set up your plants</h1>
+<p id="setupHint" class="subtitle">Your device is activated. Complete this setup before opening the dashboard.</p>
+<div id="sensorStep"><h2>How many sensors?</h2><label>Number of sensors<input id="sensorCount" type="number" min="1" max="5" inputmode="numeric" placeholder="e.g. 3"></label><button id="sensorNextBtn">Next</button></div>
+<div id="plantStep" hidden><h2>Plant details</h2><p class="subtitle">Enter the name and desired moisture percentage for each sensor.</p><div id="plantSetupList"></div><div class="actions"><button id="plantBackBtn" class="secondary">Back</button><button id="finishSetupBtn">Finish Setup</button></div></div>
+<p id="setupStatus" class="auth-status"></p><p id="setupError" class="auth-error" hidden></p>
+</div></section>
+
 <section id="customerApp" hidden><div class="customer-bar"><div><strong>Customer</strong><span id="customerUser"></span></div><div><strong>Device</strong><span id="customerDevice"></span></div><div id="customerActions" class="actions"></div></div>
 <section class="shell">
 <header class="hero"><div><p class="eyebrow">Smart Watering V3</p><h1>Plant Life Care</h1><p class="subtitle">Live monitoring and safe watering controls.</p></div><div class="hero-actions"><span id="systemBadge" class="badge neutral">WAITING</span><button id="emergencyBtn" class="danger">Emergency Stop</button><button id="resumeBtn" class="secondary" hidden>Resume System</button></div></header>
