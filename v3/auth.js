@@ -19,14 +19,15 @@
     for(let i=0;i<count;i++) wrap.insertAdjacentHTML("beforeend",`<div class="setup-plant"><h3>Sensor ${i+1}</h3><label>Plant name<input id="setupName-${i}" placeholder="Plant ${i+1}" autocomplete="off"></label><label>Moisture percentage (%)<input id="setupMoisture-${i}" type="number" min="1" max="100" inputmode="decimal" placeholder="e.g. 50"></label></div>`);
   }
   async function saveSetup(id,count,valveCount){
+    const plants=[];
     for(let i=0;i<count;i++){
       const name=(el(`setupName-${i}`).value||`Plant ${i+1}`).trim();
       const target=Number(el(`setupMoisture-${i}`).value);
       if(target<1||target>100)throw new Error(`Enter a moisture percentage from 1 to 100 for Sensor ${i+1}.`);
-      const high=Math.min(100,target+10);
-      const r=await api(`/device/${encodeURIComponent(id)}/config/plants/${i}`,{method:"PUT",body:JSON.stringify({name,targetLow:target,targetHigh:high,mode:"AUTO",sensorIndex:i})});
-      if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||`Could not save Sensor ${i+1}.`);
+      plants.push({name,targetLow:target,targetHigh:Math.min(100,target+10),mode:"AUTO",sensorIndex:i,valveIndex:i});
     }
+    const r=await api(`/device/${encodeURIComponent(id)}/config/setup`,{method:"PUT",body:JSON.stringify({sensorCount:count,valveCount,plants})});
+    if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||"Could not save the hardware setup.");
     localStorage.setItem(setupKey(id),"1");
     localStorage.setItem(setupDataKey(id),JSON.stringify({sensorCount:count,valveCount}));
   }
@@ -36,8 +37,10 @@
   }
   function bindSetup(){
     el("sensorNextBtn").onclick=()=>{
-      const n=Number(el("sensorCount").value);
-      if(!Number.isInteger(n)||n<1||n>5){el("setupError").textContent="Enter a sensor count from 1 to 5.";el("setupError").hidden=false;return}
+      const n=Number(el("sensorCount").value),v=Number(el("valveCount").value);
+      if(!Number.isInteger(n)||n<1){el("setupError").textContent="Enter a valid sensor count greater than 0.";el("setupError").hidden=false;return}
+      if(!Number.isInteger(v)||v<1){el("setupError").textContent="Enter a valid valve count greater than 0.";el("setupError").hidden=false;return}
+      if(n!==v){el("setupError").textContent=`Sensor count (${n}) must match valve count (${v}) before automatic watering can be enabled.`;el("setupError").hidden=false;return}
       el("setupError").hidden=true;renderPlantSetup(n);el("sensorStep").hidden=true;el("plantStep").hidden=false;
     };
     el("plantBackBtn").onclick=()=>{el("plantStep").hidden=true;el("sensorStep").hidden=false};
