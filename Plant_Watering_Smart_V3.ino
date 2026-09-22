@@ -21,9 +21,8 @@
 
 static const char *WIFI_SSID = "";
 static const char *WIFI_PASSWORD = "";
-static const char *FIREBASE_BASE_URL = "https://vernal-catfish-196407.firebaseio.com";
-static const char *DEVICE_ROOT_PREFIX = "/plantMonitor/v3/devices/";
-static const char *FIREBASE_AUTH = "";
+// Cloudflare Pages/Workers API. Replace with the final production Pages domain before flashing.
+static const char *CLOUD_API_BASE_URL = "https://REPLACE_WITH_CLOUDFLARE_PAGES_DOMAIN/api";
 static const char *OTA_PASSWORD = "";
 static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V3_COMMERCIAL_1.0";
 static const char *OTA_USER = "admin";
@@ -109,7 +108,7 @@ LiquidCrystal_I2C lcd(LCD_ADDRESS,16,2);
 WiFiClientSecure secureClient;
 Preferences prefs;
 WebServer server(80);
-bool wifiConnected=false, systemReady=false, emergencyStop=false, otaInProgress=false, timeSynced=false;
+bool wifiConnected=false, cloudRegistered=false, systemReady=false, emergencyStop=false, otaInProgress=false, timeSynced=false;
 int activePlant=-1, displayPlant=0;
 unsigned long bootMs=0,lastSensorMs=0,lastLcdMs=0,lastRotateMs=0,lastStatusMs=0,lastCommandMs=0,lastConfigMs=0,lastTelemetryMs=0,lastWifiRetryMs=0;
 String deviceIp="offline",lastCommandId="",lastConfigVersion="";\nString deviceId="",deviceSecret="",storedWifiSsid="",storedWifiPassword="";\nString provisioningApSsid="",provisioningApPassword="";\nbool provisioningMode=false;\nunsigned int wifiReconnectFailures=0;
@@ -279,12 +278,31 @@ void connectWifi(){
   wifiConnected=false;deviceIp="offline";wifiReconnectFailures++;
   if(wifiReconnectFailures>=2)startProvisioningAP();
 }
-String firebaseUrl(const String &path){String u=String(FIREBASE_BASE_URL)+String(DEVICE_ROOT_PREFIX)+deviceId+path+".json";if(strlen(FIREBASE_AUTH)){u+="?auth=";u+=FIREBASE_AUTH;}return u;}
+String cloudDeviceUrl(const String &path){String u=String(CLOUD_API_BASE_URL)+"/device/"+deviceId+path;return u;}
 bool httpRequest(const String &method,const String &path,const String &json,String *response=nullptr){
-  if(!wifiConnected||otaInProgress)return false;secureClient.setInsecure();HTTPClient http;if(!http.begin(secureClient,firebaseUrl(path)))return false;
-  http.setTimeout(6000);if(method!="GET")http.addHeader("Content-Type","application/json");int code=-1;
+  if(!wifiConnected||otaInProgress)return false;
+  secureClient.setInsecure();
+  HTTPClient http;
+  if(!http.begin(secureClient,cloudDeviceUrl(path)))return false;
+  http.setTimeout(6000);
+  http.addHeader("Authorization","Bearer "+deviceSecret);
+  if(method!="GET")http.addHeader("Content-Type","application/json");
+  int code=-1;
   if(method=="GET")code=http.GET();else if(method=="PUT")code=http.PUT(json);else if(method=="POST")code=http.POST(json);
-  if(response&&code>=200&&code<300)*response=http.getString();http.end();return code>=200&&code<300;
+  if(response&&code>=200&&code<300)*response=http.getString();
+  http.end();
+  return code>=200&&code<300;
+}
+bool registerCloudDevice(){
+  if(!wifiConnected||deviceId.length()<1||deviceSecret.length()<32)return false;
+  String url=String(CLOUD_API_BASE_URL)+"/device/register";
+  secureClient.setInsecure();HTTPClient http;
+  if(!http.begin(secureClient,url))return false;
+  http.setTimeout(6000);http.addHeader("Content-Type","application/json");
+  String body="{\"deviceId\":\""+safetyName(deviceId)+"\",\"deviceSecret\":\""+safetyName(deviceSecret)+"\"}";
+  int code=http.POST(body);String response=code>=200&&code<300?http.getString():"";
+  http.end();cloudRegistered=code>=200&&code<300;
+  return cloudRegistered;
 }
 bool httpGet(const String &path,String &body){return httpRequest("GET",path,"",&body);}
 bool httpPut(const String &path,const String &body){return httpRequest("PUT",path,body);}
@@ -508,11 +526,11 @@ void connectWifi(){WiFi.mode(WIFI_STA);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);unsig
 
 /* V3 commercial foundation: one firmware image can be flashed to many ESP32s.\n   Each device derives a stable product Device ID from the factory eFuse MAC,\n   stores Wi-Fi credentials in NVS, and exposes a local browser provisioning page\n   when no usable Wi-Fi is configured. The V2 controller logic remains unchanged.\n*/\nvoid setup(){
   Serial.begin(115200);bootMs=millis();initDeviceIdentity();for(int i=0;i<NUM_PLANTS;i++){pinMode(SENSOR_PINS[i],INPUT);pinMode(VALVE_PINS[i],OUTPUT);}pinMode(PUMP_PIN,OUTPUT);outputsOff();Wire.begin(SDA_PIN,SCL_PIN);lcd.init();lcd.backlight();lcd.clear();lcd.print("Plant Life Care");
-  loadEmergency();loadRuntime();connectWifi();initControlSecurity();setupProvisioningRoutes();loadOrMigratePlantConfig();systemReady=true;setupOTA();sampleSensors();publishSecurityMeta();publishStatus();
+  loadEmergency();loadRuntime();connectWifi();registerCloudDevice();initControlSecurity();setupProvisioningRoutes();loadOrMigratePlantConfig();systemReady=true;setupOTA();sampleSensors();publishSecurityMeta();publishStatus();
 }
 void loop(){
   ArduinoOTA.handle();server.handleClient();refreshRuntimeWindows();
-  if(WiFi.status()!=WL_CONNECTED){wifiConnected=false;if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){lastWifiRetryMs=millis();connectWifi();}}
+  if(WiFi.status()!=WL_CONNECTED){wifiConnected=false;cloudRegistered=false;if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){lastWifiRetryMs=millis();connectWifi();if(wifiConnected)registerCloudDevice();}}
   else {wifiConnected=true;deviceIp=WiFi.localIP().toString();}
   if(millis()-lastSensorMs>=SENSOR_SAMPLE_MS)sampleSensors();
   if(millis()-lastCommandMs>=COMMAND_MS){lastCommandMs=millis();handleCommand();}
