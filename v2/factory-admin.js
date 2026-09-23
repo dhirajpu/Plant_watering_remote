@@ -1,6 +1,6 @@
 const CFG=window.PLANT_V2_CONFIG;let token='',expires=0,status=null,busy=false;
 const $=id=>document.getElementById(id);function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
-function api(path){let u=\`${CFG.firebaseBaseUrl}${CFG.deviceRoot}\${path}.json\`;if(CFG.authToken)u+=\`?auth=\${encodeURIComponent(CFG.authToken)}\`;return u}
+function api(path){let u=CFG.firebaseBaseUrl+CFG.deviceRoot+path+'.json';if(CFG.authToken)u+='?auth='+encodeURIComponent(CFG.authToken);return u}
 async function req(path,method='GET',data){const c=new AbortController(),t=setTimeout(()=>c.abort(),7000);try{const r=await fetch(api(path),{method,headers:data?{'Content-Type':'application/json'}:undefined,body:data?JSON.stringify(data):undefined,cache:'no-store',signal:c.signal});if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}catch(e){if(e.name==='AbortError')throw new Error('Request timed out: '+path);throw e}finally{clearTimeout(t)}}
 const get=p=>req(p),put=(p,d)=>req(p,'PUT',d);
 async function sha(v){const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));return Array.from(new Uint8Array(d)).map(x=>x.toString(16).padStart(2,'0')).join('')}
