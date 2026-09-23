@@ -50,6 +50,7 @@ function passwordPrompt(message,placeholder='Enter password'){
   return new Promise(resolve=>{
     const overlay=document.createElement('div');
     overlay.className='password-prompt-overlay';
+    overlay.style.cssText='position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;min-height:100dvh!important;z-index:2147483646!important;display:flex!important;align-items:center!important;justify-content:center!important;place-items:center!important;padding:20px!important;box-sizing:border-box!important;margin:0!important;';
     overlay.innerHTML=`<div class="password-prompt-card" role="dialog" aria-modal="true" aria-labelledby="passwordPromptTitle">
       <div class="password-prompt-icon">🔐</div>
       <h3 id="passwordPromptTitle">${esc(message)}</h3>
