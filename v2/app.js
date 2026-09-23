@@ -1,11 +1,50 @@
 const CFG=window.PLANT_V2_CONFIG;let controlSessionToken=sessionStorage.getItem('plantV2ControlToken')||'';let controlSessionExpires=Number(sessionStorage.getItem('plantV2ControlExpires')||0);let securityBusy=false;
 async function sha256Text(value){const data=new TextEncoder().encode(value);const digest=await crypto.subtle.digest('SHA-256',data);return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('')}
+const CONTROL_SESSION_MS=5*60*1000;
 function controlUnlocked(){
   if(controlSessionToken&&Date.now()<controlSessionExpires)return true;
   if(controlSessionToken)lockControls();
   return false;
 }
-function lockControls(){controlSessionToken='';controlSessionExpires=0;sessionStorage.removeItem('plantV2ControlToken');sessionStorage.removeItem('plantV2ControlExpires');document.body.classList.remove('controls-unlocked');toast('Protected controls locked.')}
+function formatControlTime(ms){
+  const total=Math.max(0,Math.ceil(ms/1000));
+  const min=Math.floor(total/60),sec=total%60;
+  return String(min).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+}
+function updateControlLockUi(){
+  const unlocked=controlUnlocked();
+  const btn=document.getElementById('lockControlsBtn');
+  const status=document.getElementById('controlSessionStatus');
+  const remaining=unlocked?Math.max(0,controlSessionExpires-Date.now()):0;
+  if(btn){
+    btn.textContent=unlocked?'🔓 Controls Unlocked · '+formatControlTime(remaining):'🔒 Controls Locked · Unlock';
+    btn.setAttribute('aria-pressed',unlocked?'true':'false');
+    btn.title=unlocked?'Click to lock all protected controls now.':'Click to enter the control password and unlock protected controls for 5 minutes.';
+  }
+  if(status){
+    status.textContent=unlocked
+      ? 'Controls unlocked for 5 minutes. Time remaining: '+formatControlTime(remaining)
+      : 'Controls are locked. Unlock to use watering, mode and settings controls.';
+    status.className='control-session-status '+(unlocked?'unlocked':'locked');
+  }
+  document.body.classList.toggle('controls-unlocked',unlocked);
+  document.querySelectorAll('.actions button').forEach(b=>{
+    if(b.id!=='lockControlsBtn' && b.closest('#securityPanel')===null)b.disabled=!unlocked;
+  });
+  const changePassword=document.getElementById('changePasswordBtn');
+  if(changePassword)changePassword.disabled=!unlocked;
+}
+function lockControls(showMessage=true){
+  controlSessionToken='';controlSessionExpires=0;
+  sessionStorage.removeItem('plantV2ControlToken');sessionStorage.removeItem('plantV2ControlExpires');
+  document.body.classList.remove('controls-unlocked');
+  updateControlLockUi();
+  if(showMessage)toast('All protected controls are locked.');
+}
+async function unlockControls(){
+  if(controlUnlocked()){updateControlLockUi();return true}
+  return await requireControlAuth('Control Access');
+}
 async function pollNode(path,match,attempts=24,delayMs=250){for(let n=0;n<attempts;n++){const v=await get(path);if(v&&match(v))return v;await new Promise(r=>setTimeout(r,delayMs))}throw new Error('Controller authentication timed out.')}
 async function requireControlAuth(reason='Protected action'){
   if(controlUnlocked())return true;
@@ -28,16 +67,16 @@ async function requireControlAuth(reason='Protected action'){
     const response=await pollNode('/security/response',v=>v.id===id);
     if(!response.ok||!response.token)throw new Error('Invalid password.');
     controlSessionToken=response.token;
-    controlSessionExpires=Number(response.expiresAtMs||Date.now()+Number(meta.sessionSec||300)*1000);
+    controlSessionExpires=Date.now()+CONTROL_SESSION_MS;
     sessionStorage.setItem('plantV2ControlToken',controlSessionToken);
     sessionStorage.setItem('plantV2ControlExpires',String(controlSessionExpires));
     document.body.classList.add('controls-unlocked');
-    toast('Controls unlocked for '+Math.max(1,Math.round((controlSessionExpires-Date.now())/60000))+' min.');
+    updateControlLockUi();toast('Controls unlocked for 5 minutes.');
     return true;
   }catch(e){toast(e.message||'Authentication failed.');return false}
   finally{if(authLoader)endLoader();securityBusy=false}
 }
-function scheduleSecurityExpiry(){setInterval(()=>{if(controlSessionToken&&Date.now()>=controlSessionExpires)lockControls()},1000)}
+function scheduleSecurityExpiry(){updateControlLockUi();setInterval(()=>{if(controlSessionToken&&Date.now()>=controlSessionExpires)lockControls(false);else updateControlLockUi()},1000)}
 window.lockControls=lockControls;
 async function changeControlPassword(){
   if(!(await requireControlAuth('Change Control Password')))return;
@@ -57,7 +96,7 @@ async function changeControlPassword(){
 function addSecurityButtons(){
   const hero=document.querySelector('.hero-actions');
   if(hero&&!document.getElementById('lockControlsBtn')){
-    const b=document.createElement('button');b.id='lockControlsBtn';b.className='secondary';b.textContent='🔒 Lock Controls';b.onclick=lockControls;hero.appendChild(b);
+    const wrap=document.createElement('div');wrap.className='control-session-wrap';wrap.innerHTML='<button id="lockControlsBtn" class="secondary" type="button"></button><small id="controlSessionStatus" class="control-session-status locked"></small>';hero.appendChild(wrap);document.getElementById('lockControlsBtn').onclick=async()=>{if(controlUnlocked())lockControls();else await unlockControls();updateControlLockUi()};
   }
   const panel=document.getElementById('diagnosticsView');
   if(panel&&!document.getElementById('securityPanel')){
@@ -106,7 +145,7 @@ function plantCard(p,i){const m=Math.max(0,Math.min(100,Number(p.moisture)||0));
 <div class="actions"><button onclick="waterNow(${i})" ${p.mode==='DISABLED'?'disabled':''}>Water Now</button><button class="secondary" onclick="setMode(${i},'AUTO')">AUTO</button><button class="secondary" onclick="setMode(${i},'MANUAL')">MANUAL</button><button class="secondary" onclick="setMode(${i},'DISABLED')">Disable</button><button class="secondary" onclick="toggleSettings(${i})">Settings</button>${p.fault?`<button class="warning" onclick="clearFault(${i})">Clear Fault</button>`:''}</div>
 <div class="settings" id="settings-${i}"><div class="form-grid"><div class="field"><label>Plant name</label><input id="name-${i}" value="${esc(p.name)}"></div><div class="field"><label>Low %</label><input id="low-${i}" type="number" min="0" max="95" value="${p.targetLow}"></div><div class="field"><label>High %</label><input id="high-${i}" type="number" min="1" max="100" value="${p.targetHigh}"></div><div class="field"><label>Burst seconds</label><input id="burst-${i}" type="number" min="1" max="15" value="${Math.round((p.burstMs||3000)/1000)}"></div><div class="field"><label>Soak seconds</label><input id="soak-${i}" type="number" min="10" max="1800" value="${p.soakSec||120}"></div><div class="field"><label>Min interval minutes</label><input id="interval-${i}" type="number" min="1" value="${p.minIntervalMin||60}"></div><div class="field"><label>Mode</label><select id="mode-${i}"><option ${p.mode==='AUTO'?'selected':''}>AUTO</option><option ${p.mode==='MANUAL'?'selected':''}>MANUAL</option><option ${p.mode==='DISABLED'?'selected':''}>DISABLED</option></select></div></div><div class="actions"><button onclick="saveSettings(${i})">Save Settings</button><button class="secondary" onclick="calibrate(${i},'dry')">Record Dry</button><button class="secondary" onclick="calibrate(${i},'wet')">Record Wet</button></div></div>
 </article>`}
-function renderStatus(s){lastStatus=s;if(settingsEditing)return;const hb=Number(s.heartbeatEpochSec||0);if(hb>0){const age=Math.floor(Date.now()/1000)-hb;if(age>DEVICE_STALE_SEC){renderOffline();return}}lastLiveAt=Date.now();document.getElementById('systemBadge').textContent=s.emergencyStop?'STOPPED':'ONLINE';document.getElementById('systemBadge').className=`badge ${s.emergencyStop?'offline':'online'}`;document.getElementById('systemStatus').textContent=s.emergencyStop?'Emergency Stop':s.systemReady?'Ready':'Starting';document.getElementById('heartbeat').textContent=`Last seen ${new Date((Number(s.heartbeatEpochSec||0)||Math.floor(Date.now()/1000))*1000).toLocaleTimeString()}`;const active=Number(s.activePlantIndex);document.getElementById('activePlant').textContent=active>=0?(s.plants?.[active]?.name||`Plant ${active+1}`):'Pump OFF';document.getElementById('wateringAllowed').textContent=s.wateringAllowed?'Watering allowed':'Safety lock active';document.getElementById('wifiRssi').textContent=`${s.wifiRssi||0} dBm`;document.getElementById('deviceIp').textContent=s.ip||'--';document.getElementById('resetReason').textContent=s.resetReason||'--';document.getElementById('uptime').textContent=`Uptime ${fmtMin(s.uptimeMin)}`;document.getElementById('emergencyBtn').hidden=!!s.emergencyStop;document.getElementById('resumeBtn').hidden=!s.emergencyStop;document.getElementById('plantsGrid').innerHTML=(s.plants||[]).map(plantCard).join('')||'<div class="empty">No plants found.</div>';renderDiagnostics(s);renderOta(s)}
+function renderStatus(s){lastStatus=s;if(settingsEditing)return;const hb=Number(s.heartbeatEpochSec||0);if(hb>0){const age=Math.floor(Date.now()/1000)-hb;if(age>DEVICE_STALE_SEC){renderOffline();return}}lastLiveAt=Date.now();document.getElementById('systemBadge').textContent=s.emergencyStop?'STOPPED':'ONLINE';document.getElementById('systemBadge').className=`badge ${s.emergencyStop?'offline':'online'}`;document.getElementById('systemStatus').textContent=s.emergencyStop?'Emergency Stop':s.systemReady?'Ready':'Starting';document.getElementById('heartbeat').textContent=`Last seen ${new Date((Number(s.heartbeatEpochSec||0)||Math.floor(Date.now()/1000))*1000).toLocaleTimeString()}`;const active=Number(s.activePlantIndex);document.getElementById('activePlant').textContent=active>=0?(s.plants?.[active]?.name||`Plant ${active+1}`):'Pump OFF';document.getElementById('wateringAllowed').textContent=s.wateringAllowed?'Watering allowed':'Safety lock active';document.getElementById('wifiRssi').textContent=`${s.wifiRssi||0} dBm`;document.getElementById('deviceIp').textContent=s.ip||'--';document.getElementById('resetReason').textContent=s.resetReason||'--';document.getElementById('uptime').textContent=`Uptime ${fmtMin(s.uptimeMin)}`;document.getElementById('emergencyBtn').hidden=!!s.emergencyStop;document.getElementById('resumeBtn').hidden=!s.emergencyStop;document.getElementById('plantsGrid').innerHTML=(s.plants||[]).map(plantCard).join('')||'<div class="empty">No plants found.</div>';renderDiagnostics(s);renderOta(s);updateControlLockUi()}
 function renderDiagnostics(s){const items=[['Firmware',s.firmware],['Reset reason',s.resetReason],['System ready',s.systemReady?'YES':'NO'],['Watering allowed',s.wateringAllowed?'YES':'NO'],['Emergency stop',s.emergencyStop?'ACTIVE':'No'],['Wi-Fi RSSI',`${s.wifiRssi||0} dBm`],['Device IP',s.ip],['NTP time',s.timeSynced?'Synchronized':'Not synchronized'],['Uptime',fmtMin(s.uptimeMin)],['Active plant',s.activePlantIndex]];document.getElementById('diagnosticsGrid').innerHTML=items.map(x=>`<div class="diag"><span>${esc(x[0])}</span><strong>${esc(x[1]??'--')}</strong></div>`).join('')}
 function renderOta(s){const el=document.getElementById('otaPanel');if(!el)return;const ip=String(s.ip||'').trim();if(!ip||ip==='offline'||!s.ota){el.innerHTML='<strong>Local OTA unavailable</strong><p>Use the USB fallback firmware when the controller is not online.</p>';return}const link=`http://${ip}/update`;el.innerHTML=`<strong>${esc(s.firmware||'V2 firmware')}</strong><p>Controller: ${esc(ip)} · Authenticated local OTA is enabled.</p><a class="button-link" href="${link}" target="_blank" rel="noopener" onclick="return openProtectedOta(event,'${ip}')">Open Firmware Update</a><p class="ota-note">Your computer/phone must be on the same Wi-Fi network as the ESP32. Upload the compiled ESP32 <code>.bin</code> file. The controller forces pump and valves OFF during the update and reboots when complete.</p>`}
 window.openProtectedOta=async(e,ip)=>{e.preventDefault();if(!(await requireControlAuth('Firmware Update')))return false;window.open(`http://${ip}/update`,'_blank','noopener');return false};
