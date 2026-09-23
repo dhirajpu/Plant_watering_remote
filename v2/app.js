@@ -33,7 +33,7 @@ function updateControlLockUi(){
     if(b.id!=='lockControlsBtn' && b.closest('#securityPanel')===null)b.disabled=!unlocked;
   });
   const changePassword=document.getElementById('changePasswordBtn');
-  if(changePassword)changePassword.disabled=!unlocked;
+  if(changePassword)changePassword.disabled=false;
 }
 function lockControls(showMessage=true){
   controlSessionToken='';controlSessionExpires=0;
@@ -181,65 +181,9 @@ function plantCard(p,i){const m=Math.max(0,Math.min(100,Number(p.moisture)||0));
 <div class="actions"><button onclick="waterNow(${i})" ${p.mode==='DISABLED'?'disabled':''}>Water Now</button><button class="secondary" onclick="setMode(${i},'AUTO')">AUTO</button><button class="secondary" onclick="setMode(${i},'MANUAL')">MANUAL</button><button class="secondary" onclick="setMode(${i},'DISABLED')">Disable</button><button class="secondary" onclick="toggleSettings(${i})">Settings</button>${p.fault?`<button class="warning" onclick="clearFault(${i})">Clear Fault</button>`:''}</div>
 <div class="settings" id="settings-${i}"><div class="form-grid"><div class="field"><label>Plant name</label><input id="name-${i}" value="${esc(p.name)}"></div><div class="field"><label>Low %</label><input id="low-${i}" type="number" min="0" max="95" value="${p.targetLow}"></div><div class="field"><label>High %</label><input id="high-${i}" type="number" min="1" max="100" value="${p.targetHigh}"></div><div class="field"><label>Burst seconds</label><input id="burst-${i}" type="number" min="1" max="15" value="${Math.round((p.burstMs||3000)/1000)}"></div><div class="field"><label>Soak seconds</label><input id="soak-${i}" type="number" min="10" max="1800" value="${p.soakSec||120}"></div><div class="field"><label>Min interval minutes</label><input id="interval-${i}" type="number" min="1" value="${p.minIntervalMin||60}"></div><div class="field"><label>Mode</label><select id="mode-${i}"><option ${p.mode==='AUTO'?'selected':''}>AUTO</option><option ${p.mode==='MANUAL'?'selected':''}>MANUAL</option><option ${p.mode==='DISABLED'?'selected':''}>DISABLED</option></select></div></div><div class="actions"><button onclick="saveSettings(${i})">Save Settings</button><button class="secondary" onclick="calibrate(${i},'dry')">Record Dry</button><button class="secondary" onclick="calibrate(${i},'wet')">Record Wet</button></div></div>
 </article>`}
-function renderSuperAdmin(s){
-  const notice=document.getElementById('superAdminAuthNotice');
-  const ota=document.getElementById('superAdminOta');
-  const grid=document.getElementById('nvsConfigGrid');
-  const state=document.getElementById('nvsStateGrid');
-  const unlocked=controlUnlocked();
-  if(notice)notice.textContent=unlocked?'Control Access unlocked. Super Admin changes are enabled for this 5-minute session.':'Unlock Control Access to use Super Admin.';
-  if(!unlocked){
-    if(grid)grid.innerHTML='<div class="empty">Unlock Control Access to view and change NVS-backed plant configuration.</div>';
-    if(state)state.innerHTML='<div class="empty">Locked.</div>';
-    if(ota)ota.innerHTML='<strong>Locked</strong><p>Unlock Control Access before opening the firmware update page.</p>';
-    return;
-  }
-  const ip=String(s?.ip||'').trim();
-  if(ota){
-    if(!ip||ip==='offline'||!s?.ota)ota.innerHTML='<strong>Local OTA unavailable</strong><p>The controller is offline or local OTA is unavailable. USB firmware recovery remains the fallback.</p>';
-    else ota.innerHTML='<strong>'+esc(s.firmware||'V2 firmware')+'</strong><p>Controller: '+esc(ip)+' · OTA endpoint: <code>http://'+esc(ip)+'/update</code></p><button class="secondary" type="button" onclick="openProtectedOtaFromSuperAdmin(event,\''+esc(ip)+'\')">Open Firmware Update</button><p class="ota-note">Your phone/PC must be on the same Wi-Fi network as the ESP32. The update endpoint authenticates before accepting a firmware .bin file and forces pump/valves OFF during the update.</p>';
-  }
-  if(grid){
-    grid.innerHTML=(s.plants||[]).map((p,i)=>'<article class="nvs-config-card"><div class="nvs-config-head"><div><strong>Plant '+(i+1)+'</strong><span>'+esc(p.name||'Unnamed')+'</span></div><span class="nvs-key">plantcfg / p'+i+'</span></div><div class="form-grid"><div class="field"><label>Plant name</label><input id="nvs-name-'+i+'" value="'+esc(p.name||'')+'"></div><div class="field"><label>Low %</label><input id="nvs-low-'+i+'" type="number" min="0" max="95" value="'+Number(p.targetLow||0)+'"></div><div class="field"><label>High %</label><input id="nvs-high-'+i+'" type="number" min="1" max="100" value="'+Number(p.targetHigh||1)+'"></div><div class="field"><label>Burst seconds</label><input id="nvs-burst-'+i+'" type="number" min="1" max="15" value="'+Math.round(Number(p.burstMs||3000)/1000)+'"></div><div class="field"><label>Soak seconds</label><input id="nvs-soak-'+i+'" type="number" min="10" max="1800" value="'+Number(p.soakSec||120)+'"></div><div class="field"><label>Min interval minutes</label><input id="nvs-interval-'+i+'" type="number" min="1" max="1440" value="'+Number(p.minIntervalMin||60)+'"></div><div class="field"><label>Mode</label><select id="nvs-mode-'+i+'"><option '+(p.mode==='AUTO'?'selected':'')+'>AUTO</option><option '+(p.mode==='MANUAL'?'selected':'')+'>MANUAL</option><option '+(p.mode==='DISABLED'?'selected':'')+'>DISABLED</option></select></div><div class="field"><label>Dry raw</label><input id="nvs-air-'+i+'" type="number" value="'+Number(p.airRaw||0)+'" readonly></div><div class="field"><label>Wet raw</label><input id="nvs-wet-'+i+'" type="number" value="'+Number(p.wetRaw||0)+'" readonly></div></div><div class="actions"><button type="button" onclick="saveNvsConfig('+i+')">Save to NVS</button></div></article>').join('');
-  }
-  if(state){
-    const items=[];
-    (s.plants||[]).forEach((p,i)=>items.push(['runtime / h'+i,Math.round(Number(p.hourlyPumpMs||0)/1000)+' sec'],['runtime / d'+i,Math.round(Number(p.dailyPumpMs||0)/1000)+' sec']));
-    items.push(['safety / estop',s.emergencyStop?'ACTIVE':'false'],['plantcfg / version','Firmware schema '+String(2)],['security','Protected / not displayed']);
-    state.innerHTML=items.map(x=>'<div class="diag"><span>'+esc(x[0])+'</span><strong>'+esc(x[1])+'</strong></div>').join('');
-  }
-}
-window.openProtectedOtaFromSuperAdmin=async function(e,ip){
-  if(e)e.preventDefault();
-  if(!(await requireControlAuth('Firmware Update')))return false;
-  window.open('http://'+ip+'/update','_blank','noopener');
-  return false;
-};
-window.saveNvsConfig=async function(i){
-  if(commandBusy)return toast('Please wait — previous command is still executing.');
-  if(!(await requireControlAuth('NVS Configuration')))return;
-  try{
-    await withLoader('Saving NVS configuration…',async()=>{
-      const cfg={name:document.getElementById('nvs-name-'+i).value.trim(),targetLow:Number(document.getElementById('nvs-low-'+i).value),targetHigh:Number(document.getElementById('nvs-high-'+i).value),burstMs:Number(document.getElementById('nvs-burst-'+i).value)*1000,soakSec:Number(document.getElementById('nvs-soak-'+i).value),minIntervalMin:Number(document.getElementById('nvs-interval-'+i).value),mode:document.getElementById('nvs-mode-'+i).value};
-      if(!cfg.name)throw new Error('Plant name is required.');
-      if(cfg.targetHigh<=cfg.targetLow)throw new Error('High threshold must be greater than low threshold.');
-      if(cfg.burstMs<1000||cfg.burstMs>15000)throw new Error('Burst must be between 1 and 15 seconds.');
-      if(cfg.soakSec<10||cfg.soakSec>1800)throw new Error('Soak must be between 10 and 1800 seconds.');
-      if(cfg.minIntervalMin<1||cfg.minIntervalMin>1440)throw new Error('Minimum interval must be between 1 and 1440 minutes.');
-      const id=await sendCommand('set_config',{plantIndex:i,...cfg},'Save NVS Configuration');
-      if(!id)return;
-      finishCommand('NVS configuration saved for Plant '+(i+1)+'.');
-      await new Promise(r=>setTimeout(r,800));
-      await window.refresh();
-      if(lastStatus)renderSuperAdmin(lastStatus);
-    });
-  }catch(e){finishCommand('Failed: '+e.message)}
-};
-function renderStatus(s){lastStatus=s;if(settingsEditing)return;const hb=Number(s.heartbeatEpochSec||0);if(hb>0){const age=Math.floor(Date.now()/1000)-hb;if(age>DEVICE_STALE_SEC){renderOffline();return}}lastLiveAt=Date.now();document.getElementById('systemBadge').textContent=s.emergencyStop?'STOPPED':'ONLINE';document.getElementById('systemBadge').className=`badge ${s.emergencyStop?'offline':'online'}`;document.getElementById('systemStatus').textContent=s.emergencyStop?'Emergency Stop':s.systemReady?'Ready':'Starting';document.getElementById('heartbeat').textContent=`Last seen ${new Date((Number(s.heartbeatEpochSec||0)||Math.floor(Date.now()/1000))*1000).toLocaleTimeString()}`;const active=Number(s.activePlantIndex);document.getElementById('activePlant').textContent=active>=0?(s.plants?.[active]?.name||`Plant ${active+1}`):'Pump OFF';document.getElementById('wateringAllowed').textContent=s.wateringAllowed?'Watering allowed':'Safety lock active';document.getElementById('wifiRssi').textContent=`${s.wifiRssi||0} dBm`;document.getElementById('deviceIp').textContent=s.ip||'--';document.getElementById('resetReason').textContent=s.resetReason||'--';document.getElementById('uptime').textContent=`Uptime ${fmtMin(s.uptimeMin)}`;document.getElementById('emergencyBtn').hidden=!!s.emergencyStop;document.getElementById('resumeBtn').hidden=!s.emergencyStop;document.getElementById('plantsGrid').innerHTML=(s.plants||[]).map(plantCard).join('')||'<div class="empty">No plants found.</div>';renderDiagnostics(s);renderOta(s);renderSuperAdmin(s);updateControlLockUi()}
+function renderStatus(s){lastStatus=s;if(settingsEditing)return;const hb=Number(s.heartbeatEpochSec||0);if(hb>0){const age=Math.floor(Date.now()/1000)-hb;if(age>DEVICE_STALE_SEC){renderOffline();return}}lastLiveAt=Date.now();document.getElementById('systemBadge').textContent=s.emergencyStop?'STOPPED':'ONLINE';document.getElementById('systemBadge').className=`badge ${s.emergencyStop?'offline':'online'}`;document.getElementById('systemStatus').textContent=s.emergencyStop?'Emergency Stop':s.systemReady?'Ready':'Starting';document.getElementById('heartbeat').textContent=`Last seen ${new Date((Number(s.heartbeatEpochSec||0)||Math.floor(Date.now()/1000))*1000).toLocaleTimeString()}`;const active=Number(s.activePlantIndex);document.getElementById('activePlant').textContent=active>=0?(s.plants?.[active]?.name||`Plant ${active+1}`):'Pump OFF';document.getElementById('wateringAllowed').textContent=s.wateringAllowed?'Watering allowed':'Safety lock active';document.getElementById('wifiRssi').textContent=`${s.wifiRssi||0} dBm`;document.getElementById('deviceIp').textContent=s.ip||'--';document.getElementById('resetReason').textContent=s.resetReason||'--';document.getElementById('uptime').textContent=`Uptime ${fmtMin(s.uptimeMin)}`;document.getElementById('emergencyBtn').hidden=!!s.emergencyStop;document.getElementById('resumeBtn').hidden=!s.emergencyStop;document.getElementById('plantsGrid').innerHTML=(s.plants||[]).map(plantCard).join('')||'<div class="empty">No plants found.</div>';renderDiagnostics(s);updateControlLockUi()}
 function renderDiagnostics(s){const items=[['Firmware',s.firmware],['Reset reason',s.resetReason],['System ready',s.systemReady?'YES':'NO'],['Watering allowed',s.wateringAllowed?'YES':'NO'],['Emergency stop',s.emergencyStop?'ACTIVE':'No'],['Wi-Fi RSSI',`${s.wifiRssi||0} dBm`],['Device IP',s.ip],['NTP time',s.timeSynced?'Synchronized':'Not synchronized'],['Uptime',fmtMin(s.uptimeMin)],['Active plant',s.activePlantIndex]];document.getElementById('diagnosticsGrid').innerHTML=items.map(x=>`<div class="diag"><span>${esc(x[0])}</span><strong>${esc(x[1]??'--')}</strong></div>`).join('')}
-function renderOta(s){const el=document.getElementById('otaPanel');if(!el)return;const ip=String(s.ip||'').trim();if(!ip||ip==='offline'||!s.ota){el.innerHTML='<strong>Local OTA unavailable</strong><p>Use the USB fallback firmware when the controller is not online.</p>';return}const link=`http://${ip}/update`;el.innerHTML=`<strong>${esc(s.firmware||'V2 firmware')}</strong><p>Controller: ${esc(ip)} · Authenticated local OTA is enabled.</p><a class="button-link" href="${link}" target="_blank" rel="noopener" onclick="return openProtectedOta(event,'${ip}')">Open Firmware Update</a><p class="ota-note">Your computer/phone must be on the same Wi-Fi network as the ESP32. Upload the compiled ESP32 <code>.bin</code> file. The controller forces pump and valves OFF during the update and reboots when complete.</p>`}
-window.openProtectedOta=async(e,ip)=>{e.preventDefault();if(!(await requireControlAuth('Firmware Update')))return false;window.open(`http://${ip}/update`,'_blank','noopener');return false};
-function renderOffline(){document.getElementById('systemBadge').textContent='OFFLINE';document.getElementById('systemBadge').className='badge offline';document.getElementById('systemStatus').textContent='Offline';document.getElementById('heartbeat').textContent='Waiting for V2 firmware heartbeat';renderOta({ip:'offline',ota:false})}
+function renderOffline(){document.getElementById('systemBadge').textContent='OFFLINE';document.getElementById('systemBadge').className='badge offline';document.getElementById('systemStatus').textContent='Offline';document.getElementById('heartbeat').textContent='Waiting for V2 firmware heartbeat';}
 window.waterNow=async i=>{if(commandBusy)return toast('Please wait — previous command is still executing.');const s=prompt('Water for how many seconds?','5');if(s===null)return;const sec=Math.max(1,Math.min(45,Number(s)||5));try{await withLoader('Sending Water Now…',()=>sendCommand('water_now',{plantIndex:i,durationSec:sec},'Water Now'))}catch(e){}}
 window.setMode=async(i,mode)=>{try{await withLoader('Changing mode to '+mode+'…',async()=>{const id=await sendCommand('set_mode',{plantIndex:i,mode},mode);if(!id)return;toast('Mode changed to '+mode);finishCommand('Mode changed to '+mode);await refresh()})}catch(e){finishCommand('Failed: '+e.message)}};
 window.clearFault=async i=>{try{await withLoader('Clearing fault…',async()=>{const id=await sendCommand('clear_fault',{plantIndex:i},'Clear Fault');if(id){toast('Clear Fault sent. Waiting for controller…');await refresh()}})}catch(e){}};
@@ -254,7 +198,7 @@ function renderChart(){const el=document.getElementById('chart');if(!telemetry.l
 async function switchView(id){if(id==='diagnosticsView'){if(!(await withLoader('Authorizing diagnostics…',()=>requireControlAuth('Diagnostics'))))return}document.querySelectorAll('.dashboard-view').forEach(v=>v.classList.toggle('active',v.id===id));document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===id));if(id==='historyView')await loadHistory(true)}
 document.querySelectorAll('.menu-btn').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
 async function refresh(){if(settingsEditing)return;try{const s=await get('/status');if(!s)throw new Error('No V2 status yet');renderStatus(s)}catch(e){if(Date.now()-lastLiveAt>(CFG.staleTimeoutSec*1000))renderOffline()}}
-document.getElementById('emergencyBtn').onclick=async()=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(confirm('Stop pump and close all valves?'))try{await withLoader('Stopping watering system…',()=>sendCommand('emergency_stop',{},'Emergency Stop'))}catch(e){}};document.getElementById('resumeBtn').onclick=async()=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(confirm('Resume automatic watering?'))try{await withLoader('Resuming watering system…',()=>sendCommand('resume',{},'Resume'))}catch(e){}};
+document.getElementById('changePasswordBtn').onclick=changeControlPassword;document.getElementById('emergencyBtn').onclick=async()=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(confirm('Stop pump and close all valves?'))try{await withLoader('Stopping watering system…',()=>sendCommand('emergency_stop',{},'Emergency Stop'))}catch(e){}};document.getElementById('resumeBtn').onclick=async()=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(confirm('Resume automatic watering?'))try{await withLoader('Resuming watering system…',()=>sendCommand('resume',{},'Resume'))}catch(e){}};
 async function finishStartupLoading(message=''){setLoader(false,message)}
 async function initialDashboardLoad(){beginLoader('Connecting to your controller and loading the latest data…');try{await window.refresh();if(!lastStatus||Date.now()-lastLiveAt>(CFG.staleTimeoutSec*1000))renderOffline();if(lastStatus)endLoader();else{await Promise.allSettled([window.loadHistory(),typeof window.refreshBrowserWeather==='function'?window.refreshBrowserWeather():Promise.resolve()]);endLoader()}window.loadHistory();if(typeof window.refreshBrowserWeather==='function')window.refreshBrowserWeather()}
 catch(e){console.warn('startup',e);renderOffline();endLoader()}}
