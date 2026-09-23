@@ -1090,3 +1090,20 @@ button.warning{background:linear-gradient(135deg,#d7a03e,#bd7c21)}
   .section{border-radius:18px}
   .summary-grid{gap:10px}
 }
+
+
+/* ===== Control session button readability ===== */
+.control-session-wrap button{
+  background:linear-gradient(135deg,#274b60,#18384c)!important;
+  color:#ffffff!important;
+  border:1px solid #456b7d!important;
+  text-shadow:0 1px 1px rgba(0,0,0,.22);
+}
+.control-session-wrap button:hover:not(:disabled){
+  background:linear-gradient(135deg,#315d74,#20485d)!important;
+  color:#ffffff!important;
+}
+.control-session-wrap button:focus-visible{
+  outline:3px solid rgba(20,154,120,.30);
+  outline-offset:2px;
+}
