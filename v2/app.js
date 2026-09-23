@@ -1,6 +1,10 @@
 const CFG=window.PLANT_V2_CONFIG;let controlSessionToken=sessionStorage.getItem('plantV2ControlToken')||'';let controlSessionExpires=Number(sessionStorage.getItem('plantV2ControlExpires')||0);let securityBusy=false;
 async function sha256Text(value){const data=new TextEncoder().encode(value);const digest=await crypto.subtle.digest('SHA-256',data);return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('')}
-function controlUnlocked(){return !!controlSessionToken&&Date.now()<controlSessionExpires}
+function controlUnlocked(){
+  if(controlSessionToken&&Date.now()<controlSessionExpires)return true;
+  if(controlSessionToken)lockControls();
+  return false;
+}
 function lockControls(){controlSessionToken='';controlSessionExpires=0;sessionStorage.removeItem('plantV2ControlToken');sessionStorage.removeItem('plantV2ControlExpires');document.body.classList.remove('controls-unlocked');toast('Protected controls locked.')}
 async function pollNode(path,match,attempts=24,delayMs=250){for(let n=0;n<attempts;n++){const v=await get(path);if(v&&match(v))return v;await new Promise(r=>setTimeout(r,delayMs))}throw new Error('Controller authentication timed out.')}
 async function requireControlAuth(reason='Protected action'){
