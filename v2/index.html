@@ -36,6 +36,7 @@
         <button class="menu-btn active" data-view="overview">Overview</button>
         <button class="menu-btn" data-view="historyView">History</button>
         <button class="menu-btn" data-view="diagnosticsView">Diagnostics</button>
+        <button class="menu-btn" data-view="superAdminView">Super Admin</button>
       </nav>
 
       <div id="overview" class="dashboard-view active">
@@ -77,6 +78,45 @@
           <div class="section-head"><div><h2>Firmware Update</h2><p>Wireless update is available when this controller is on your local Wi-Fi network.</p></div></div>
           <div id="otaPanel" class="ota-card"><strong>Waiting for controller...</strong><p>The controller IP will appear here when V2 is online.</p></div>
         </section>
+      </div>
+
+      <div id="superAdminView" class="dashboard-view">
+        <section class="section">
+          <div class="section-head">
+            <div><h2>Super Admin</h2><p>Protected controller administration. Monitoring remains available without this page; administrative changes require control authentication.</p></div>
+          </div>
+          <div id="superAdminAuthNotice" class="empty">Unlock Control Access to use Super Admin.</div>
+        </section>
+
+        <section class="section superadmin-card">
+          <div class="section-head">
+            <div><h2>OTA Upgradation</h2><p>Update the ESP32 firmware wirelessly while the controller and your device are on the same local Wi-Fi network.</p></div>
+          </div>
+          <div id="superAdminOta" class="ota-card"><strong>Waiting for controller...</strong><p>Controller information will appear when V2 is online.</p></div>
+        </section>
+
+        <section class="section superadmin-card">
+          <div class="section-head">
+            <div><h2>NVS Configuration</h2><p>These settings are stored locally in ESP32 NVS and are used by the controller for offline watering. Saving here updates RAM immediately and persists the values to NVS.</p></div>
+          </div>
+          <div id="nvsConfigGrid" class="nvs-config-grid"><div class="empty">Unlock Control Access and load the controller configuration.</div></div>
+        </section>
+
+        <section class="section superadmin-card">
+          <div class="section-head">
+            <div><h2>Local Device State</h2><p>Local persistent state. Security password material is never displayed here.</p></div>
+          </div>
+          <div id="nvsStateGrid" class="diagnostics-grid"></div>
+        </section>
+
+        <section class="section superadmin-card">
+          <div class="section-head">
+            <div><h2>Factory Reset Settings</h2><p>Restores plant settings and calibration values to the defaults built into the installed firmware. Watering and telemetry history remain intact.</p></div>
+            <div class="actions"><button class="danger" id="superAdminFactoryResetBtn">Factory Reset Settings</button></div>
+          </div>
+        </section>
+
+        <section id="superAdminSecurityPanel" class="section superadmin-card"></section>
       </div>
 
       <div id="toast" class="toast" hidden></div>
