@@ -1,14 +1,46 @@
-const CFG=window.PLANT_V2_CONFIG;let token='',expires=0,status=null,busy=false;
-const $=id=>document.getElementById(id);function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+const CFG=window.PLANT_V2_CONFIG;let token='',expires=0,status=null,busy=false,loaderDepth=0;
+const $=id=>document.getElementById(id);
+function showLoader(message='Waiting for controller response…'){loaderDepth++;const e=$('globalLoader');if(e){$('globalLoaderText').textContent=message;e.hidden=false;}}
+function hideLoader(){loaderDepth=Math.max(0,loaderDepth-1);if(loaderDepth===0){const e=$('globalLoader');if(e)e.hidden=true;}}
+async function withLoader(message,task){showLoader(message);try{return await task()}finally{hideLoader()}}function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
 function api(path){let u=CFG.firebaseBaseUrl+CFG.deviceRoot+path+'.json';if(CFG.authToken)u+='?auth='+encodeURIComponent(CFG.authToken);return u}
 async function req(path,method='GET',data){const c=new AbortController(),t=setTimeout(()=>c.abort(),7000);try{const r=await fetch(api(path),{method,headers:data?{'Content-Type':'application/json'}:undefined,body:data?JSON.stringify(data):undefined,cache:'no-store',signal:c.signal});if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}catch(e){if(e.name==='AbortError')throw new Error('Request timed out: '+path);throw e}finally{clearTimeout(t)}}
 const get=p=>req(p),put=(p,d)=>req(p,'PUT',d);
 async function sha(v){const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));return Array.from(new Uint8Array(d)).map(x=>x.toString(16).padStart(2,'0')).join('')}
 function id(){return Date.now()+'-'+Math.random().toString(16).slice(2)}function toast(m){const e=$('toast');e.textContent=m;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,3500)}
 async function poll(path,match,n=24){for(let i=0;i<n;i++){const v=await get(path);if(v&&match(v))return v;await new Promise(r=>setTimeout(r,250))}throw new Error('Controller authentication timed out.')}
-async function authenticate(){if(token&&Date.now()<expires)return true;const password=$('factoryPassword').value;if(!password)return false;$('loginError').textContent='';try{const meta=await get('/security/meta');if(!meta?.enabled||!meta.manufacturerSalt)throw new Error('Manufacturer security is not initialized.');const requestId=id(),clientNonce=await sha(requestId+'|'+Date.now()+'|'+Math.random());await put('/security/manufacturer/request',{id:requestId,clientNonce});const challenge=await poll('/security/manufacturer/challenge',v=>v.id===requestId&&v.serverNonce);const passwordHash=await sha(password+meta.manufacturerSalt);const proof=await sha(passwordHash+challenge.serverNonce+clientNonce);await put('/security/manufacturer/request',{id:requestId,clientNonce,proof});const response=await poll('/security/manufacturer/response',v=>v.id===requestId);if(!response.ok||!response.token)throw new Error(response.error||'Invalid manufacturer password.');token=response.token;expires=Date.now()+Number(meta.sessionSec||300)*1000;$('loginSection').hidden=true;$('adminContent').hidden=false;await load();toast('Factory portal unlocked.');return true}catch(e){$('loginError').textContent=e.message||'Authentication failed.';return false}}
-async function command(action,extra,label){if(busy)return null;if(!(await authenticate()))return null;busy=true;try{const requestId=id();await put('/command',{id:requestId,action,...extra,authToken:token,authRole:'manufacturer',issuedAtEpochSec:Math.floor(Date.now()/1000)});for(let i=0;i<32;i++){const a=await get('/commandAck');if(a&&a.id===requestId){if(a.result==='unauthorized')throw new Error('Factory session rejected.');if(a.result==='expired')throw new Error('Command expired.');toast(label+': '+a.result);await load();return a}await new Promise(r=>setTimeout(r,250))}throw new Error('Controller did not acknowledge the command.')}catch(e){toast(label+' failed: '+e.message);throw e}finally{busy=false}}
-async function load(){try{status=await get('/status');if(!status)throw new Error('No controller status.');$('deviceSummary').textContent=(status.firmware||'V2 firmware')+' · '+(status.ip||'offline')+' · '+(status.timeSynced?'Clock synced':'Clock not synced');$('deviceState').innerHTML=[['Firmware',status.firmware||'--'],['IP address',status.ip||'offline'],['Wi-Fi RSSI',String(status.wifiRssi??'--')+' dBm'],['Uptime',String(status.uptimeMin??'--')+' min'],['System',status.systemReady?'Ready':'Not ready'],['Watering',status.wateringAllowed?'Allowed':'Blocked'],['Emergency stop',status.emergencyStop?'ACTIVE':'false'],['Plants',status.totalPlants??5]].map(x=>'<div class="diag"><span>'+esc(x[0])+'</span><strong>'+esc(x[1])+'</strong></div>').join('');const ip=String(status.ip||'').trim();$('otaPanel').innerHTML=ip&&ip!=='offline'&&status.ota?'<strong>'+esc(status.firmware||'V2 firmware')+'</strong><p>Local controller: '+esc(ip)+'</p><button class="secondary" id="otaBtn">Open Firmware Update</button><p class="ota-note">PC/phone must be on the same Wi-Fi network as the ESP32.</p>':'<strong>Local OTA unavailable</strong><p>Connect the controller to Wi-Fi or use USB recovery.</p>';if($('otaBtn'))$('otaBtn').onclick=async()=>{try{const a=await command('ota_ticket',{},'Authorize firmware update');if(a?.ticket)window.open('http://'+ip+'/update?ticket='+encodeURIComponent(a.ticket),'_blank','noopener')}catch(e){}};renderNvs()}catch(e){toast('Load failed: '+e.message)}}
+async function authenticate(){
+  if(token&&Date.now()<expires)return true;
+  return withLoader('Authenticating manufacturer…',async()=>{
+    const password=$('factoryPassword').value;
+    if(!password)return false;
+    $('loginError').textContent='';
+    try{
+      const meta=await get('/security/meta');
+      if(!meta?.enabled||!meta.manufacturerSalt)throw new Error('Manufacturer security is not initialized.');
+      const requestId=id(),clientNonce=await sha(requestId+'|'+Date.now()+'|'+Math.random());
+      await put('/security/manufacturer/request',{id:requestId,clientNonce});
+      const challenge=await poll('/security/manufacturer/challenge',v=>v.id===requestId&&v.serverNonce);
+      const passwordHash=await sha(password+meta.manufacturerSalt);
+      const proof=await sha(passwordHash+challenge.serverNonce+clientNonce);
+      await put('/security/manufacturer/request',{id:requestId,clientNonce,proof});
+      const response=await poll('/security/manufacturer/response',v=>v.id===requestId);
+      if(!response.ok||!response.token)throw new Error(response.error||'Invalid manufacturer password.');
+      token=response.token;
+      expires=Date.now()+Number(meta.sessionSec||300)*1000;
+      $('loginSection').hidden=true;
+      $('adminContent').hidden=false;
+      await load();
+      toast('Factory portal unlocked.');
+      return true;
+    }catch(e){
+      $('loginError').textContent=e.message||'Authentication failed.';
+      return false;
+    }
+  });
+}
+async function command(action,extra,label){if(busy)return null;return withLoader(label+'…',async()=>{if(!(await authenticate()))return null;busy=true;try{const requestId=id();await put('/command',{id:requestId,action,...extra,authToken:token,authRole:'manufacturer',issuedAtEpochSec:Math.floor(Date.now()/1000)});for(let i=0;i<32;i++){const a=await get('/commandAck');if(a&&a.id===requestId){if(a.result==='unauthorized')throw new Error('Factory session rejected.');if(a.result==='expired')throw new Error('Command expired.');toast(label+': '+a.result);await load();return a}await new Promise(r=>setTimeout(r,250))}throw new Error('Controller did not acknowledge the command.')}catch(e){toast(label+' failed: '+e.message);throw e}finally{busy=false}});}
+async function load(){return withLoader('Loading controller data…',async()=>{try{status=await get('/status');if(!status)throw new Error('No controller status.');$('deviceSummary').textContent=(status.firmware||'V2 firmware')+' · '+(status.ip||'offline')+' · '+(status.timeSynced?'Clock synced':'Clock not synced');$('deviceState').innerHTML=[['Firmware',status.firmware||'--'],['IP address',status.ip||'offline'],['Wi-Fi RSSI',String(status.wifiRssi??'--')+' dBm'],['Uptime',String(status.uptimeMin??'--')+' min'],['System',status.systemReady?'Ready':'Not ready'],['Watering',status.wateringAllowed?'Allowed':'Blocked'],['Emergency stop',status.emergencyStop?'ACTIVE':'false'],['Plants',status.totalPlants??5]].map(x=>'<div class="diag"><span>'+esc(x[0])+'</span><strong>'+esc(x[1])+'</strong></div>').join('');const ip=String(status.ip||'').trim();$('otaPanel').innerHTML=ip&&ip!=='offline'&&status.ota?'<strong>'+esc(status.firmware||'V2 firmware')+'</strong><p>Local controller: '+esc(ip)+'</p><button class="secondary" id="otaBtn">Open Firmware Update</button><p class="ota-note">PC/phone must be on the same Wi-Fi network as the ESP32.</p>':'<strong>Local OTA unavailable</strong><p>Connect the controller to Wi-Fi or use USB recovery.</p>';if($('otaBtn'))$('otaBtn').onclick=async()=>{try{const a=await command('ota_ticket',{},'Authorize firmware update');if(a?.ticket)window.open('http://'+ip+'/update?ticket='+encodeURIComponent(a.ticket),'_blank','noopener')}catch(e){}};renderNvs()}catch(e){toast('Load failed: '+e.message)} });}
 function renderNvs(){
   const plants=status?.plants||[];
   $('nvsGrid').innerHTML=plants.map((p,i)=>`
