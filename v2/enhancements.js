@@ -107,10 +107,9 @@
     }catch(e){console.warn('history',e)}
   };
 
+  window.refreshBrowserWeather=refreshBrowserWeather;
   const oldRefresh=window.refresh;
   window.refresh=async function(){await oldRefresh();if(currentStatus){decoratePlants();updateWeatherCard();}};
-  refreshBrowserWeather();setInterval(refreshBrowserWeather,30*60*1000);
-  setTimeout(()=>{window.refresh();window.loadHistory();},250);
-  setInterval(()=>{window.refresh();},5000);
-  setInterval(()=>{window.loadHistory();},60000);
+  refreshBrowserWeather();
+  setInterval(refreshBrowserWeather,30*60*1000);
 })();
