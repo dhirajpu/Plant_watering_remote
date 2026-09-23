@@ -33,3 +33,7 @@
   .password-prompt-actions{display:grid;grid-template-columns:1fr 1fr}
   .password-prompt-actions button{width:100%}
 }
+
+/* ===== Password prompt centering hardening ===== */
+.password-prompt-overlay{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;min-height:100dvh!important;margin:0!important;display:flex!important;align-items:center!important;justify-content:center!important;place-items:center!important;box-sizing:border-box!important}
+.password-prompt-card{position:relative!important;left:auto!important;top:auto!important;right:auto!important;bottom:auto!important;transform:none!important;margin:auto!important;flex:0 1 420px!important}
