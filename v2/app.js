@@ -46,13 +46,36 @@ async function unlockControls(){
   return await requireControlAuth('Control Access');
 }
 async function pollNode(path,match,attempts=24,delayMs=250){for(let n=0;n<attempts;n++){const v=await get(path);if(v&&match(v))return v;await new Promise(r=>setTimeout(r,delayMs))}throw new Error('Controller authentication timed out.')}
+function passwordPrompt(message,placeholder='Enter password'){
+  return new Promise(resolve=>{
+    const overlay=document.createElement('div');
+    overlay.className='password-prompt-overlay';
+    overlay.innerHTML=`<div class="password-prompt-card" role="dialog" aria-modal="true" aria-labelledby="passwordPromptTitle">
+      <div class="password-prompt-icon">🔐</div>
+      <h3 id="passwordPromptTitle">${esc(message)}</h3>
+      <p>Enter the password to continue.</p>
+      <input id="passwordPromptInput" type="password" autocomplete="current-password" placeholder="${esc(placeholder)}">
+      <div class="password-prompt-actions">
+        <button type="button" class="secondary" id="passwordPromptCancel">Cancel</button>
+        <button type="button" id="passwordPromptOk">Continue</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const input=overlay.querySelector('#passwordPromptInput');
+    const finish=value=>{overlay.remove();resolve(value)};
+    overlay.querySelector('#passwordPromptCancel').onclick=()=>finish(null);
+    overlay.querySelector('#passwordPromptOk').onclick=()=>finish(input.value);
+    input.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();finish(input.value)}else if(e.key==='Escape')finish(null)});
+    requestAnimationFrame(()=>input.focus());
+  });
+}
 async function requireControlAuth(reason='Protected action'){
   if(controlUnlocked())return true;
   if(securityBusy)return false;
   securityBusy=true;
   let authLoader=false;
   try{
-    const password=prompt('🔐 '+reason+' requires the control password.');
+    const password=await passwordPrompt(reason);
     if(password===null)return false;
     if(!password.length){toast('Password is required.');return false}
     beginLoader('Authenticating '+reason+'…');authLoader=true;
@@ -80,10 +103,10 @@ function scheduleSecurityExpiry(){updateControlLockUi();setInterval(()=>{if(cont
 window.lockControls=lockControls;
 async function changeControlPassword(){
   if(!(await requireControlAuth('Change Control Password')))return;
-  const next=prompt('Enter the new control password (8+ characters):');
+  const next=await passwordPrompt('Enter the new control password (8+ characters).','New password');
   if(next===null)return;
   if(next.length<8){toast('Use at least 8 characters.');return}
-  const confirmPassword=prompt('Confirm the new control password:');
+  const confirmPassword=await passwordPrompt('Confirm the new control password.','Confirm password');
   if(confirmPassword!==next){toast('Passwords do not match.');return}
   try{
     const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
