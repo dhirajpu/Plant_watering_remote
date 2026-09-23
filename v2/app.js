@@ -87,7 +87,7 @@ function setLoader(active,message='Loading…'){
   if(main)main.inert=active;
 }
 function beginLoader(message){loaderDepth++;setLoader(true,message)}
-function endLoader(){loaderDepth=Math.max(0,loaderDepth-1);if(loaderDepth===0){clearTimeout(loaderTimer);setLoader(false)}}
+function endLoader(){loaderDepth=Math.max(0,loaderDepth-1);if(loaderDepth===0)setLoader(false)}
 async function withLoader(message,task){beginLoader(message);try{return await task()}finally{endLoader()}}
 function commandId(){return `${Date.now()}-${Math.random().toString(16).slice(2)}`}
 function setCommandBusy(active,label='Processing…'){commandBusy=active;document.querySelectorAll('.actions button,#emergencyBtn,#resumeBtn').forEach(b=>{if(active){if(!b.disabled){b.dataset.originalText=b.textContent;b.disabled=true}}else if(b.dataset.originalText!==undefined){b.textContent=b.dataset.originalText;delete b.dataset.originalText;b.disabled=false}});if(active){commandButtons=Array.from(document.querySelectorAll('.actions button,#emergencyBtn,#resumeBtn')).filter(b=>b.disabled);commandButtons.forEach(b=>{b.dataset.originalText=b.textContent;b.textContent=label})}}
