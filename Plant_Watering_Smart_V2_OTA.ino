@@ -355,6 +355,7 @@ void handleSecurity(){
   }else response+=",\"error\":\"Invalid password\"";
   response+="}";
   httpPut(base+"/response",response);
+  httpPut(base+"/request","null");
   challenge="";challengeId="";challengeExpires=0;
 }
 
@@ -467,7 +468,7 @@ void setup(){
   loadEmergency();loadRuntime();connectWifi();initControlSecurity();loadOrMigratePlantConfig();systemReady=true;setupOTA();sampleSensors();publishSecurityMeta();publishStatus();
 }
 void loop(){
-  ArduinoOTA.handle();server.handleClient();refreshRuntimeWindows();
+  server.handleClient();refreshRuntimeWindows();
   if(WiFi.status()!=WL_CONNECTED){wifiConnected=false;if(millis()-lastWifiRetryMs>=WIFI_RETRY_MS){lastWifiRetryMs=millis();connectWifi();}}
   else {wifiConnected=true;deviceIp=WiFi.localIP().toString();}
   if(millis()-lastSensorMs>=SENSOR_SAMPLE_MS)sampleSensors();
