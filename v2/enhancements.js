@@ -103,7 +103,7 @@
     const run=async()=>{
       try{
         const [t,h,c]=await Promise.all([baseGet('/history/telemetry'),baseGet('/history/watering'),baseGet('/history/connectivity')]);
-        telemetry=baseRows(t).slice(-48);window.wateringHistory=baseRows(h).slice(-30).reverse();connectivityHistory=baseRows(c).slice(-40).reverse();
+        telemetry=baseRows(t).slice(-48);if(window.setWateringHistory)window.setWateringHistory(h);connectivityHistory=baseRows(c).slice(-40).reverse();
         window.renderChart();if(window.renderHistory)window.renderHistory();renderConnectivity();return true;
       }catch(e){console.warn('history',e);return false}
     };
