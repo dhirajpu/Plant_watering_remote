@@ -17,7 +17,7 @@
       <div class="section-head"><div><h2>Factory Access</h2><p>This portal is separate from the customer dashboard. Manufacturer authorization is required.</p></div></div>
       <div class="password-prompt-card" style="position:relative;max-width:520px;margin:0;">
         <div class="password-prompt-icon">🔐</div><h3>Manufacturer authentication</h3>
-        <p>Enter the controller factory/control password to continue.</p>
+        <p>Enter the manufacturer-only password to continue.</p>
         <input id="factoryPassword" type="password" autocomplete="current-password" placeholder="Factory password">
         <div class="password-prompt-actions"><button id="loginBtn">Unlock Factory Portal</button></div>
         <p id="loginError" style="color:#b91c1c;"></p>
@@ -28,7 +28,7 @@
       <section class="section superadmin-card"><div class="section-head"><div><h2>OTA Upgradation</h2><p>Upload firmware through the controller's local network update page.</p></div></div><div id="otaPanel" class="ota-card"></div></section>
       <section class="section superadmin-card"><div class="section-head"><div><h2>NVS Configuration</h2><p>Factory-level plant configuration persisted in ESP32 NVS.</p></div></div><div id="nvsGrid" class="nvs-config-grid"></div></section>
       <section class="section superadmin-card"><div class="section-head"><div><h2>Factory Reset Settings</h2><p>Restores plant configuration and calibration values to firmware defaults. History is preserved.</p></div><div class="actions"><button class="danger" id="resetBtn">Factory Reset Settings</button></div></div></section>
-      <section class="section superadmin-card"><div class="section-head"><div><h2>Factory Security</h2><p>Change the controller control password. Password hash and salt remain on the ESP32.</p></div><div class="actions"><button class="secondary" id="passwordBtn">Change Password</button></div></div></section>
+      <section class="section superadmin-card"><div class="section-head"><div><h2>Factory Security</h2><p>Change the manufacturer-only password. It is completely separate from the customer's control password.</p></div><div class="actions"><button class="secondary" id="passwordBtn">Change Password</button></div></div></section>
     </div>
     <div id="toast" class="toast" hidden></div>
   </section></main>
