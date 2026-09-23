@@ -7,10 +7,12 @@ async function requireControlAuth(reason='Protected action'){
   if(controlUnlocked())return true;
   if(securityBusy)return false;
   securityBusy=true;
+  let authLoader=false;
   try{
     const password=prompt('🔐 '+reason+' requires the control password.');
     if(password===null)return false;
     if(!password.length){toast('Password is required.');return false}
+    beginLoader('Authenticating '+reason+'…');authLoader=true;
     const meta=await get('/security/meta');
     if(!meta?.enabled||!meta.salt)throw new Error('Controller security is not initialized.');
     const id=commandId(),clientNonce=await sha256Text(id+'|'+Date.now()+'|'+Math.random());
@@ -29,7 +31,7 @@ async function requireControlAuth(reason='Protected action'){
     toast('Controls unlocked for '+Math.max(1,Math.round((controlSessionExpires-Date.now())/60000))+' min.');
     return true;
   }catch(e){toast(e.message||'Authentication failed.');return false}
-  finally{securityBusy=false}
+  finally{if(authLoader)endLoader();securityBusy=false}
 }
 function scheduleSecurityExpiry(){setInterval(()=>{if(controlSessionToken&&Date.now()>=controlSessionExpires)lockControls()},1000)}
 window.lockControls=lockControls;
