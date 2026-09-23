@@ -73,9 +73,9 @@
           <div class="section-head"><div><h2>Diagnostics</h2><p>Open this page when checking power-return, sensors, Wi-Fi or safety state.</p></div></div>
           <div id="diagnosticsGrid" class="diagnostics-grid"></div>
         </section>
-        <section class="section ota-panel">
-          <div class="section-head"><div><h2>Firmware Update</h2><p>Wireless update is available when this controller is on your local Wi-Fi network.</p></div></div>
-          <div id="otaPanel" class="ota-card"><strong>Waiting for controller...</strong><p>The controller IP will appear here when V2 is online.</p></div>
+        <section class="section">
+          <div class="section-head"><div><h2>Control Password</h2><p>Change the password used by the customer to lock or unlock watering controls.</p></div><div class="actions"><button id="changePasswordBtn" class="secondary" type="button">Change Password</button></div></div>
+          <div class="ota-card"><strong>Customer Control Access</strong><p>This password protects Water Now, AUTO/MANUAL/DISABLED, settings, calibration and other protected controls.</p><p class="ota-note">The password is stored on the ESP32 as a salted SHA-256 hash. Firmware update and factory administration are not available from the customer dashboard.</p></div>
         </section>
       </div>
 
