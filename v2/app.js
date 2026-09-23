@@ -28,7 +28,7 @@ function updateControlLockUi(){
     status.className='control-session-status '+(unlocked?'unlocked':'locked');
   }
   document.body.classList.toggle('controls-unlocked',unlocked);
-  if(!unlocked&&document.getElementById('superAdminView')?.classList.contains('active'))renderSuperAdmin(lastStatus||{});
+  
   document.querySelectorAll('.actions button').forEach(b=>{
     if(b.id!=='lockControlsBtn' && b.closest('#securityPanel')===null)b.disabled=!unlocked;
   });
@@ -140,14 +140,7 @@ function addSecurityButtons(){
   if(hero&&!document.getElementById('lockControlsBtn')){
     const wrap=document.createElement('div');wrap.className='control-session-wrap';wrap.innerHTML='<button id="lockControlsBtn" class="secondary" type="button"></button><small id="controlSessionStatus" class="control-session-status locked"></small>';hero.appendChild(wrap);document.getElementById('lockControlsBtn').onclick=async()=>{if(controlUnlocked())lockControls();else await unlockControls();updateControlLockUi()};
   }
-  const panel=document.getElementById('superAdminSecurityPanel');
-  if(panel&&!document.getElementById('securityPanel')){
-    panel.id='securityPanel';
-    panel.innerHTML='<div class="section-head"><div><h2>Control Security</h2><p>Super Admin changes require authentication and automatically lock after 5 minutes.</p></div><div class="actions"><button class="secondary" id="changePasswordBtn">Change Control Password</button></div></div><div class="factory-reset-note">The controller keeps the password hash and salt locally in NVS. They are never shown in the dashboard.</div>';
-    document.getElementById('changePasswordBtn').onclick=changeControlPassword;
-  }
-  const reset=document.getElementById('superAdminFactoryResetBtn');
-  if(reset)reset.onclick=factoryResetPlantSettings;
+
 }
 let lastStatus=null;let settingsEditing=false;let lastLiveAt=0;const DEVICE_STALE_SEC=15;let telemetry=[];let wateringHistory=[];let commandBusy=false;let commandTimer=null;let commandButtons=[];
 function url(path){let u=`${CFG.firebaseBaseUrl}${CFG.deviceRoot}${path}.json`;if(CFG.authToken)u+=`?auth=${encodeURIComponent(CFG.authToken)}`;return u}
@@ -258,7 +251,7 @@ async function loadHistory(showLoader=false){const run=async()=>{try{const [t,h]
 window.setWateringHistory=function(obj){wateringHistory=rows(obj).sort((a,b)=>{const ae=Number(a?.timestampEpochMs||0),be=Number(b?.timestampEpochMs||0);if(ae!==be)return be-ae;const ad=Date.parse(a?.timestamp||'')||0,bd=Date.parse(b?.timestamp||'')||0;return bd-ad}).map(x=>x);renderHistory()};
 function renderHistory(){const el=document.getElementById('history');if(!wateringHistory.length){el.innerHTML='<div class="empty">No watering history yet.</div>';return}el.innerHTML=wateringHistory.map(x=>{const dateTime=x.timestamp?fmtHistoryDate(x.timestamp):(x.timestampEpochMs?fmtHistoryDate(Number(x.timestampEpochMs)):'');return `<div class="history-item"><strong>${esc(x.plantName||`Plant ${Number(x.plantIndex)+1}`)}</strong><small>${dateTime?`<span class="history-time">${esc(dateTime)}</span> · `:''}${Math.round((x.durationMs||0)/1000)} sec · ${esc(x.reason||'Completed')} · ${x.moistureStart??'--'}% → ${x.moistureEnd??'--'}%</small></div>`}).join('')}
 function renderChart(){const el=document.getElementById('chart');if(!telemetry.length){el.innerHTML='<div class="empty">No telemetry yet.</div>';return}const plants=telemetry[telemetry.length-1]?.plants||[];const W=700,H=230,pad=25;let paths='';plants.forEach((_,pi)=>{const pts=telemetry.map((r,idx)=>{const x=pad+(idx/Math.max(1,telemetry.length-1))*(W-pad*2);const m=Number(r.plants?.[pi]?.moisture||0);const y=H-pad-(m/100)*(H-pad*2);return `${x.toFixed(1)},${y.toFixed(1)}`}).join(' ');paths+=`<polyline points="${pts}" fill="none" stroke="hsl(${(pi*67)%360} 55% 42%)" stroke-width="3"/>`});el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="${pad}" y1="${pad}" x2="${pad}" y2="${H-pad}" stroke="#d1d5db"/><line x1="${pad}" y1="${H-pad}" x2="${W-pad}" y2="${H-pad}" stroke="#d1d5db"/>${paths}</svg><div class="chart-legend">${plants.map((p,i)=>`<span>● ${esc(p.name||`Plant ${i+1}`)}</span>`).join('')}</div>`}
-async function switchView(id){if(id==='diagnosticsView'){if(!(await withLoader('Authorizing diagnostics…',()=>requireControlAuth('Diagnostics'))))return}if(id==='superAdminView'){if(!(await withLoader('Authorizing Super Admin…',()=>requireControlAuth('Super Admin'))))return;if(lastStatus)renderSuperAdmin(lastStatus)}document.querySelectorAll('.dashboard-view').forEach(v=>v.classList.toggle('active',v.id===id));document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===id));if(id==='historyView')await loadHistory(true)}
+async function switchView(id){if(id==='diagnosticsView'){if(!(await withLoader('Authorizing diagnostics…',()=>requireControlAuth('Diagnostics'))))return}document.querySelectorAll('.dashboard-view').forEach(v=>v.classList.toggle('active',v.id===id));document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===id));if(id==='historyView')await loadHistory(true)}
 document.querySelectorAll('.menu-btn').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
 async function refresh(){if(settingsEditing)return;try{const s=await get('/status');if(!s)throw new Error('No V2 status yet');renderStatus(s)}catch(e){if(Date.now()-lastLiveAt>(CFG.staleTimeoutSec*1000))renderOffline()}}
 document.getElementById('emergencyBtn').onclick=async()=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(confirm('Stop pump and close all valves?'))try{await withLoader('Stopping watering system…',()=>sendCommand('emergency_stop',{},'Emergency Stop'))}catch(e){}};document.getElementById('resumeBtn').onclick=async()=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(confirm('Resume automatic watering?'))try{await withLoader('Resuming watering system…',()=>sendCommand('resume',{},'Resume'))}catch(e){}};
