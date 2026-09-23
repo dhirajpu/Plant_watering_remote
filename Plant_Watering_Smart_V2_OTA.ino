@@ -30,6 +30,8 @@ static const uint32_t PLANT_CONFIG_VERSION = 2; // Bump when source plant defaul
 static const char *OTA_USER = "admin";
 // Change this before the first flash on a new controller. The value is only used to initialize the NVS hash.
 static const char *CONTROL_DEFAULT_PASSWORD = "357896";
+// Manufacturer-only factory credential. Change this before provisioning production controllers.
+static const char *MANUFACTURER_DEFAULT_PASSWORD = "Factory@357896";
 static const unsigned long CONTROL_SESSION_MS = 5UL*60UL*1000UL;
 static const unsigned long CONTROL_CHALLENGE_MS = 60UL*1000UL;
 static const unsigned long SECURITY_POLL_MS = 1000UL;
@@ -114,8 +116,8 @@ bool wifiConnected=false, systemReady=false, emergencyStop=false, otaInProgress=
 int activePlant=-1, displayPlant=0;
 unsigned long bootMs=0,lastSensorMs=0,lastLcdMs=0,lastRotateMs=0,lastStatusMs=0,lastCommandMs=0,lastConfigMs=0,lastTelemetryMs=0,lastWifiRetryMs=0;
 String deviceIp="offline",lastCommandId="",lastConfigVersion="";
-String controlPasswordHash="",controlSalt="",authChallenge="",authChallengeId="",controlSessionToken="";
-unsigned long authChallengeExpiresMs=0,controlSessionExpiresMs=0,lastSecurityMs=0,lastSecurityRequestMs=0;
+String controlPasswordHash="",controlSalt="",manufacturerPasswordHash="",manufacturerSalt="",authChallenge="",authChallengeId="",authChallengeRole="",controlSessionToken="",manufacturerSessionToken="";
+unsigned long authChallengeExpiresMs=0,controlSessionExpiresMs=0,manufacturerSessionExpiresMs=0,lastSecurityMs=0,lastSecurityRequestMs=0;
 
 String boolJson(bool v){return v?"true":"false";}
 String modeText(PlantMode m){if(m==MODE_MANUAL)return "MANUAL";if(m==MODE_DISABLED)return "DISABLED";return "AUTO";}
@@ -289,45 +291,63 @@ void initControlSecurity(){
   if(!controlSalt.length()){controlSalt=randomHex(16);prefs.putString("salt",controlSalt);}
   if(controlPasswordHash.length()!=64){controlPasswordHash=sha256Hex(String(CONTROL_DEFAULT_PASSWORD)+controlSalt);prefs.putString("passHash",controlPasswordHash);}
   prefs.end();
-  controlSessionToken="";controlSessionExpiresMs=0;authChallenge="";authChallengeId="";authChallengeExpiresMs=0;
+
+  prefs.begin("manufacturer",false);
+  manufacturerSalt=prefs.getString("salt","");
+  manufacturerPasswordHash=prefs.getString("passHash","");
+  if(!manufacturerSalt.length()){manufacturerSalt=randomHex(16);prefs.putString("salt",manufacturerSalt);}
+  if(manufacturerPasswordHash.length()!=64){manufacturerPasswordHash=sha256Hex(String(MANUFACTURER_DEFAULT_PASSWORD)+manufacturerSalt);prefs.putString("passHash",manufacturerPasswordHash);}
+  prefs.end();
+
+  controlSessionToken="";controlSessionExpiresMs=0;manufacturerSessionToken="";manufacturerSessionExpiresMs=0;
+  authChallenge="";authChallengeId="";authChallengeRole="";authChallengeExpiresMs=0;
 }
 bool controlSessionValid(const String &token){
   return token.length()>0 && constantTimeEqual(token,controlSessionToken) && (long)(millis()-controlSessionExpiresMs)<0;
 }
+bool manufacturerSessionValid(const String &token){
+  return token.length()>0 && constantTimeEqual(token,manufacturerSessionToken) && (long)(millis()-manufacturerSessionExpiresMs)<0;
+}
 void publishSecurityMeta(){
   if(!wifiConnected)return;
-  String meta="{\"enabled\":true,\"algorithm\":\"SHA-256(password+salt) + SHA-256(hash+serverNonce+clientNonce)\",\"salt\":\""+controlSalt+"\",\"sessionSec\":"+String(CONTROL_SESSION_MS/1000UL)+"}";
+  String meta="{\"enabled\":true,\"algorithm\":\"SHA-256(password+salt) + SHA-256(hash+serverNonce+clientNonce)\",\"salt\":\""+controlSalt+"\",\"manufacturerSalt\":\""+manufacturerSalt+"\",\"sessionSec\":"+String(CONTROL_SESSION_MS/1000UL)+"}";
   httpPut("/security/meta",meta);
 }
 void handleSecurity(){
   if(!wifiConnected)return;
   String req;
   if(!httpGet("/security/request",req)||req.length()<2||req=="null")return;
-  String id=jsonValue(req,"id"),clientNonce=jsonValue(req,"clientNonce"),proof=jsonValue(req,"proof");
+  String id=jsonValue(req,"id"),clientNonce=jsonValue(req,"clientNonce"),proof=jsonValue(req,"proof"),role=jsonValue(req,"role");
   if(!id.length()||!clientNonce.length())return;
+  if(role!="manufacturer")role="customer";
   if(id!=authChallengeId && proof.length()==0){
-    authChallengeId=id;authChallenge=randomHex(24);authChallengeExpiresMs=millis()+CONTROL_CHALLENGE_MS;
-    String challenge="{\"id\":\""+safetyName(id)+"\",\"serverNonce\":\""+authChallenge+"\",\"expiresAtMs\":"+String(authChallengeExpiresMs)+"}";
+    authChallengeId=id;authChallengeRole=role;authChallenge=randomHex(24);authChallengeExpiresMs=millis()+CONTROL_CHALLENGE_MS;
+    String challenge="{\"id\":\""+safetyName(id)+"\",\"role\":\""+authChallengeRole+"\",\"serverNonce\":\""+authChallenge+"\",\"expiresAtMs\":"+String(authChallengeExpiresMs)+"}";
     httpPut("/security/challenge",challenge);return;
   }
-  if(id!=authChallengeId||!proof.length()||millis()>=authChallengeExpiresMs)return;
-  String expected=sha256Hex(controlPasswordHash+authChallenge+clientNonce);bool ok=constantTimeEqual(proof,expected);
-  String response="{\"id\":\""+safetyName(id)+"\",\"ok\":"+boolJson(ok);
-  if(ok){controlSessionToken=randomHex(32);controlSessionExpiresMs=millis()+CONTROL_SESSION_MS;response+=",\"token\":\""+controlSessionToken+"\",\"expiresAtMs\":"+String(controlSessionExpiresMs);}
-  else response+=",\"error\":\"Invalid password\"";
+  if(id!=authChallengeId||role!=authChallengeRole||!proof.length()||millis()>=authChallengeExpiresMs)return;
+  String storedHash=(role=="manufacturer")?manufacturerPasswordHash:controlPasswordHash;
+  String expected=sha256Hex(storedHash+authChallenge+clientNonce);bool ok=constantTimeEqual(proof,expected);
+  String response="{\"id\":\""+safetyName(id)+"\",\"role\":\""+authChallengeRole+"\",\"ok\":"+boolJson(ok);
+  if(ok){
+    String token=randomHex(32);
+    if(role=="manufacturer"){manufacturerSessionToken=token;manufacturerSessionExpiresMs=millis()+CONTROL_SESSION_MS;response+=",\"token\":\""+token+"\",\"expiresAtMs\":"+String(manufacturerSessionExpiresMs);}
+    else {controlSessionToken=token;controlSessionExpiresMs=millis()+CONTROL_SESSION_MS;response+=",\"token\":\""+token+"\",\"expiresAtMs\":"+String(controlSessionExpiresMs);}
+  } else response+=",\"error\":\"Invalid password\"";
   response+="}";httpPut("/security/response",response);
-  authChallenge="";authChallengeId="";authChallengeExpiresMs=0;
+  authChallenge="";authChallengeId="";authChallengeRole="";authChallengeExpiresMs=0;
 }
 
 void handleCommand(){
   String b;if(!httpGet("/command",b)||b.length()<2||b=="null")return;String id=jsonValue(b,"id");if(!id.length()||id==lastCommandId)return;String action=jsonValue(b,"action");String authToken=jsonValue(b,"authToken");int p=(int)jsonLong(b,"plantIndex",-1);
   bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet"||action=="set_config"||action=="factory_reset_config"||action=="change_password";
+  String authRole=jsonValue(b,"authRole");if(authRole!="manufacturer")authRole="customer";
   long issuedSec=jsonLong(b,"issuedAtEpochSec",0);
   if(issuedSec<=0){long legacyMs=jsonLong(b,"issuedAtEpochMs",0);if(legacyMs>0)issuedSec=legacyMs/1000L;}
   bool valid=true;
   if(action!="emergency_stop"&&timeSynced&&issuedSec>0){long nowSec=(long)time(nullptr);long ageSec=nowSec-issuedSec;if(ageSec<-(long)(REMOTE_COMMAND_FUTURE_SKEW_MS/1000UL)||ageSec>(long)(REMOTE_COMMAND_MAX_AGE_MS/1000UL))valid=false;}
   String result="ignored";
-  if(protectedAction&&!controlSessionValid(authToken))result="unauthorized";
+  if(protectedAction&&((authRole=="manufacturer"&&!manufacturerSessionValid(authToken))||(authRole=="customer"&&!controlSessionValid(authToken))))result="unauthorized";
   else if(!valid)result="expired";else if(action=="emergency_stop"){emergencyStop=true;outputsOff();if(activePlant>=0)states[activePlant].lastStopReason=STOP_EMERGENCY;activePlant=-1;saveEmergency();result="stopped";}
   else if(action=="resume"){emergencyStop=false;outputsOff();saveEmergency();result="resumed";}
   else if(action=="set_mode"&&p>=0&&p<NUM_PLANTS){plants[p].mode=parseMode(jsonValue(b,"mode"));savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));httpPut("/config/version",String(millis()));result="mode_set";}
@@ -336,8 +356,9 @@ void handleCommand(){
   else if(action=="calibrate_dry"&&p>=0&&p<NUM_PLANTS){plants[p].airRaw=states[p].raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="dry_recorded";}
   else if(action=="calibrate_wet"&&p>=0&&p<NUM_PLANTS){plants[p].wetRaw=states[p].raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="wet_recorded";}
   else if(action=="set_config"&&p>=0&&p<NUM_PLANTS){String n=jsonValue(b,"name"),m=jsonValue(b,"mode");if(n.length())plants[p].name=n;plants[p].targetLow=constrain((int)jsonLong(b,"targetLow",plants[p].targetLow),0,95);plants[p].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[p].targetHigh),plants[p].targetLow+1,100);plants[p].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[p].burstMs),1000UL,plants[p].maxBurstMs);plants[p].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[p].soakMs/1000UL),10UL,1800UL)*1000UL;plants[p].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[p].minIntervalMs/60000UL),1UL,1440UL)*60000UL;if(m.length())plants[p].mode=parseMode(m);savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));httpPut("/config/version",String(millis()));result="config_set";}
-  else if(action=="factory_reset_config"){factoryResetPlantConfig();result="config_factory_reset";}
-  else if(action=="change_password"){String newSalt=jsonValue(b,"newSalt"),newHash=jsonValue(b,"newHash");if(newSalt.length()>=16&&newSalt.length()<=64&&newHash.length()==64){prefs.begin("security",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();controlSalt=newSalt;controlPasswordHash=newHash;result="password_changed";}else result="invalid_password_data";}
+  else if(action=="factory_reset_config"&&authRole=="manufacturer"){factoryResetPlantConfig();result="config_factory_reset";}
+  else if(action=="factory_reset_config"){result="unauthorized";}
+  else if(action=="change_password"){String newSalt=jsonValue(b,"newSalt"),newHash=jsonValue(b,"newHash");if(newSalt.length()>=16&&newSalt.length()<=64&&newHash.length()==64){if(authRole=="manufacturer"){prefs.begin("manufacturer",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();manufacturerSalt=newSalt;manufacturerPasswordHash=newHash;manufacturerSessionToken="";manufacturerSessionExpiresMs=0;result="manufacturer_password_changed";}else{prefs.begin("security",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();controlSalt=newSalt;controlPasswordHash=newHash;controlSessionToken="";controlSessionExpiresMs=0;result="password_changed";}}else result="invalid_password_data";}
   if(action=="water_now"&&p>=0&&p<NUM_PLANTS&&result=="queued")startSession(p,true,states[p].manualRequestedMs);
   String ack="{\"id\":\""+safetyName(id)+"\",\"action\":\""+safetyName(action)+"\",\"result\":\""+safetyName(result)+"\",\"handledAtMs\":"+String(millis())+"}";httpPut("/commandAck",ack);lastCommandId=id;
 }
