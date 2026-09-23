@@ -107,7 +107,7 @@
         window.renderChart();if(window.renderHistory)window.renderHistory();renderConnectivity();return true;
       }catch(e){console.warn('history',e);return false}
     };
-    return showLoader&&typeof window.withLoader==='function'?window.withLoader('Loading history…',run):run();
+    return showLoader&&typeof withLoader==='function'?withLoader('Loading history…',run):run();
   };
 
   window.refreshBrowserWeather=refreshBrowserWeather;
