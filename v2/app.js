@@ -94,11 +94,53 @@ window.calibrate=async(i,kind)=>{if(!confirm(`Record current sensor reading as $
 window.toggleSettings=async i=>{if(commandBusy)return toast('Please wait — previous command is still executing.');const el=document.getElementById(`settings-${i}`);const opening=!el.classList.contains('open');if(opening&&!(await requireControlAuth('Settings')))return;document.querySelectorAll('.settings.open').forEach(x=>x.classList.remove('open'));el.classList.toggle('open',opening);settingsEditing=opening;if(opening)toast('Auto refresh paused while editing settings.');else{toast('Auto refresh resumed.');refresh()}};
 window.saveSettings=async i=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(!(await requireControlAuth('Save Settings')))return;try{const cfg={name:document.getElementById(`name-${i}`).value.trim(),targetLow:Number(document.getElementById(`low-${i}`).value),targetHigh:Number(document.getElementById(`high-${i}`).value),burstMs:Number(document.getElementById(`burst-${i}`).value)*1000,soakSec:Number(document.getElementById(`soak-${i}`).value),minIntervalMin:Number(document.getElementById(`interval-${i}`).value),mode:document.getElementById(`mode-${i}`).value};if(cfg.targetHigh<=cfg.targetLow)throw new Error('High threshold must be greater than low threshold');const id=await sendCommand('set_config',{plantIndex:i,...cfg},'Save Settings');if(!id)return;settingsEditing=false;finishCommand('Settings saved successfully');await refresh()}catch(e){finishCommand(`Failed: ${e.message}`)}};
 function rows(obj){return obj&&typeof obj==='object'?Object.values(obj):[]}
-async function loadHistory(){try{const [t,h]=await Promise.all([get('/history/telemetry'),get('/history/watering')]);telemetry=rows(t).slice(-48);wateringHistory=rows(h).slice(-30).reverse();renderChart();renderHistory()}catch(e){console.warn(e)}}
+async function loadHistory(){try{const [t,h]=await Promise.all([get('/history/telemetry'),get('/history/watering')]);telemetry=rows(t).slice(-48);wateringHistory=rows(h).slice(-30).reverse();window.renderChart();window.renderHistory()}catch(e){console.warn('history',e)}}
 function renderHistory(){const el=document.getElementById('history');if(!wateringHistory.length){el.innerHTML='<div class="empty">No watering history yet.</div>';return}el.innerHTML=wateringHistory.map(x=>{const dateTime=x.timestamp?fmtHistoryDate(x.timestamp):(x.timestampEpochMs?fmtHistoryDate(Number(x.timestampEpochMs)):'');return `<div class="history-item"><strong>${esc(x.plantName||`Plant ${Number(x.plantIndex)+1}`)}</strong><small>${dateTime?`<span class="history-time">${esc(dateTime)}</span> · `:''}${Math.round((x.durationMs||0)/1000)} sec · ${esc(x.reason||'Completed')} · ${x.moistureStart??'--'}% → ${x.moistureEnd??'--'}%</small></div>`}).join('')}
 function renderChart(){const el=document.getElementById('chart');if(!telemetry.length){el.innerHTML='<div class="empty">No telemetry yet.</div>';return}const plants=telemetry[telemetry.length-1]?.plants||[];const W=700,H=230,pad=25;let paths='';plants.forEach((_,pi)=>{const pts=telemetry.map((r,idx)=>{const x=pad+(idx/Math.max(1,telemetry.length-1))*(W-pad*2);const m=Number(r.plants?.[pi]?.moisture||0);const y=H-pad-(m/100)*(H-pad*2);return `${x.toFixed(1)},${y.toFixed(1)}`}).join(' ');paths+=`<polyline points="${pts}" fill="none" stroke="hsl(${(pi*67)%360} 55% 42%)" stroke-width="3"/>`});el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="${pad}" y1="${pad}" x2="${pad}" y2="${H-pad}" stroke="#d1d5db"/><line x1="${pad}" y1="${H-pad}" x2="${W-pad}" y2="${H-pad}" stroke="#d1d5db"/>${paths}</svg><div class="chart-legend">${plants.map((p,i)=>`<span>● ${esc(p.name||`Plant ${i+1}`)}</span>`).join('')}</div>`}
 async function switchView(id){if(id==='diagnosticsView'&&!(await requireControlAuth('Diagnostics')))return;document.querySelectorAll('.dashboard-view').forEach(v=>v.classList.toggle('active',v.id===id));document.querySelectorAll('.menu-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===id));if(id==='historyView')loadHistory()}
 document.querySelectorAll('.menu-btn').forEach(btn=>btn.addEventListener('click',()=>switchView(btn.dataset.view)));
 async function refresh(){if(settingsEditing)return;try{const s=await get('/status');if(!s)throw new Error('No V2 status yet');renderStatus(s)}catch(e){if(Date.now()-lastLiveAt>(CFG.staleTimeoutSec*1000))renderOffline()}}
 document.getElementById('emergencyBtn').onclick=async()=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(confirm('Stop pump and close all valves?'))try{await sendCommand('emergency_stop',{},'Emergency Stop')}catch(e){}};document.getElementById('resumeBtn').onclick=async()=>{if(commandBusy)return toast('Please wait — previous command is still executing.');if(confirm('Resume automatic watering?'))try{await sendCommand('resume',{},'Resume')}catch(e){}};
-async function finishStartupLoading(){const loader=document.getElementById('startupLoader');if(!loader)return;loader.classList.add('hidden');setTimeout(()=>loader.remove(),300)}\nasync function initialDashboardLoad(){try{await Promise.all([refresh(),loadHistory()])}finally{finishStartupLoading()}}\ninitialDashboardLoad();scheduleSecurityExpiry();setTimeout(addSecurityButtons,0);setInterval(refresh,CFG.refreshMs);setInterval(loadHistory,60000);
+async function finishStartupLoading(message=''){
+  const loader=document.getElementById('startupLoader');
+  if(!loader)return;
+  if(message){
+    const text=loader.querySelector('.startup-loader-card span');
+    if(text)text.textContent=message;
+  }
+  loader.classList.add('hidden');
+  setTimeout(()=>loader.remove(),300);
+}
+async function initialDashboardLoad(){
+  const started=Date.now();
+  const loader=document.getElementById('startupLoader');
+  try{
+    if(loader){
+      const text=loader.querySelector('.startup-loader-card span');
+      if(text)text.textContent='Connecting to your controller and loading the latest data…';
+    }
+    const tasks=[window.refresh(),window.loadHistory()];
+    if(typeof window.refreshBrowserWeather==='function')tasks.push(window.refreshBrowserWeather());
+    await Promise.allSettled(tasks);
+    if(!lastStatus||Date.now()-lastLiveAt>(CFG.staleTimeoutSec*1000))renderOffline();
+    if(loader){
+      const elapsed=Date.now()-started;
+      const minimumDisplay=Math.max(0,500-elapsed);
+      await new Promise(r=>setTimeout(r,minimumDisplay));
+    }
+    finishStartupLoading();
+  }catch(e){
+    console.warn('startup',e);
+    renderOffline();
+    finishStartupLoading('Controller unavailable — showing offline dashboard.');
+  }
+}
+function startDashboard(){
+  scheduleSecurityExpiry();
+  setTimeout(addSecurityButtons,0);
+  initialDashboardLoad();
+  setInterval(()=>window.refresh(),CFG.refreshMs);
+  setInterval(()=>window.loadHistory(),60000);
+}
+if(document.readyState==='complete')startDashboard();
+else window.addEventListener('load',startDashboard,{once:true});
