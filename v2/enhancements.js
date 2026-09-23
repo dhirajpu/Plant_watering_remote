@@ -99,12 +99,15 @@
     el.innerHTML=connectivityHistory.map(x=>{const t=String(x.type||'EVENT');const icon=t==='WIFI_CONNECTED'?'🟢':t==='WIFI_DISCONNECTED'?'🔴':'🔄';const when=x.epochMs?new Date(Number(x.epochMs)).toLocaleString():'Time unavailable';return `<div class="history-item connectivity-item"><strong>${icon} ${esc(t.replaceAll('_',' '))}</strong><small>${esc(when)} · ${esc(x.reason||'')}</small></div>`}).join('');
   }
 
-  window.loadHistory=async function(){
-    try{
-      const [t,h,c]=await Promise.all([baseGet('/history/telemetry'),baseGet('/history/watering'),baseGet('/history/connectivity')]);
-      telemetry=baseRows(t).slice(-48);window.wateringHistory=baseRows(h).slice(-30).reverse();connectivityHistory=baseRows(c).slice(-40).reverse();
-      window.renderChart();if(window.renderHistory)window.renderHistory();renderConnectivity();
-    }catch(e){console.warn('history',e)}
+  window.loadHistory=async function(showLoader=false){
+    const run=async()=>{
+      try{
+        const [t,h,c]=await Promise.all([baseGet('/history/telemetry'),baseGet('/history/watering'),baseGet('/history/connectivity')]);
+        telemetry=baseRows(t).slice(-48);window.wateringHistory=baseRows(h).slice(-30).reverse();connectivityHistory=baseRows(c).slice(-40).reverse();
+        window.renderChart();if(window.renderHistory)window.renderHistory();renderConnectivity();return true;
+      }catch(e){console.warn('history',e);return false}
+    };
+    return showLoader&&typeof window.withLoader==='function'?window.withLoader('Loading history…',run):run();
   };
 
   window.refreshBrowserWeather=refreshBrowserWeather;
