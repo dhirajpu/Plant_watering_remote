@@ -28,7 +28,7 @@ static const char *OTA_PASSWORD = "";
 static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.4_SECURITY";
 static const char *OTA_USER = "admin";
 // Change this before the first flash on a new controller. The value is only used to initialize the NVS hash.
-static const char *CONTROL_DEFAULT_PASSWORD = "CHANGE_ME_CONTROL_PASSWORD";
+static const char *CONTROL_DEFAULT_PASSWORD = "357896";
 static const unsigned long CONTROL_SESSION_MS = 5UL*60UL*1000UL;
 static const unsigned long CONTROL_CHALLENGE_MS = 60UL*1000UL;
 static const unsigned long SECURITY_POLL_MS = 1000UL;
@@ -233,7 +233,13 @@ void updateConfig(){for(int i=0;i<NUM_PLANTS;i++){String b;if(!httpGet(String("/
 
 String sha256Hex(const String &input){
   uint8_t digest[32];
-  mbedtls_sha256_ret((const unsigned char*)input.c_str(), input.length(), digest, 0);
+  mbedtls_sha256_context ctx;
+  mbedtls_sha256_init(&ctx);
+  mbedtls_sha256_starts(&ctx, 0);
+  mbedtls_sha256_update(&ctx, (const unsigned char*)input.c_str(), input.length());
+  mbedtls_sha256_finish(&ctx, digest);
+  mbedtls_sha256_free(&ctx);
+
   char hex[65];
   for(int i=0;i<32;i++)sprintf(hex+(i*2),"%02x",digest[i]);
   hex[64]='\0';
