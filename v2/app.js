@@ -117,6 +117,23 @@ async function changeControlPassword(){
     if(id)finishCommand('Control password changed successfully.');
   }catch(e){finishCommand('Failed: '+e.message)}
 }
+async function factoryResetPlantSettings(){
+  if(commandBusy)return toast('Please wait — previous command is still executing.');
+  if(!(await requireControlAuth('Factory Reset Settings')))return;
+  const confirmed=confirm('Factory reset all plant settings?\\n\\nThis will restore all 5 plants to the firmware defaults, including plant names, moisture thresholds, watering timings, modes and dry/wet calibration values. Your watering and telemetry history will not be deleted.\\n\\nContinue?');
+  if(!confirmed)return;
+  try{
+    await withLoader('Resetting plant settings to firmware defaults…',async()=>{
+      const id=await sendCommand('factory_reset_config',{},'Factory Reset Settings');
+      if(!id)return;
+      settingsEditing=false;
+      finishCommand('Factory reset command sent. Applying firmware defaults…');
+      await new Promise(r=>setTimeout(r,1200));
+      await window.refresh();
+      await window.loadHistory();
+    });
+  }catch(e){finishCommand('Factory reset failed: '+e.message)}
+}
 function addSecurityButtons(){
   const hero=document.querySelector('.hero-actions');
   if(hero&&!document.getElementById('lockControlsBtn')){
@@ -125,9 +142,10 @@ function addSecurityButtons(){
   const panel=document.getElementById('diagnosticsView');
   if(panel&&!document.getElementById('securityPanel')){
     const section=document.createElement('section');section.className='section';section.id='securityPanel';
-    section.innerHTML='<div class="section-head"><div><h2>Control Security</h2><p>Monitoring remains view-only. Control changes require authentication and automatically lock after 5 minutes.</p></div><div class="actions"><button class="secondary" id="changePasswordBtn">Change Control Password</button></div></div>';
+    section.innerHTML='<div class="section-head"><div><h2>Control Security</h2><p>Monitoring remains view-only. Control changes require authentication and automatically lock after 5 minutes.</p></div><div class="actions"><button class="secondary" id="changePasswordBtn">Change Control Password</button><button class="danger" id="factoryResetSettingsBtn">Factory Reset Settings</button></div></div><div class="factory-reset-note">Restores all plant settings and calibration values to the defaults built into the current firmware. Watering and telemetry history are kept.</div>';
     panel.appendChild(section);
     document.getElementById('changePasswordBtn').onclick=changeControlPassword;
+    document.getElementById('factoryResetSettingsBtn').onclick=factoryResetPlantSettings;
   }
 }
 let lastStatus=null;let settingsEditing=false;let lastLiveAt=0;const DEVICE_STALE_SEC=15;let telemetry=[];let wateringHistory=[];let commandBusy=false;let commandTimer=null;let commandButtons=[];
