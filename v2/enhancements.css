@@ -1,1 +1,35 @@
 .plant-card{position:relative;overflow:hidden;transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease}.plant-card:hover{transform:translateY(-3px);box-shadow:0 20px 45px rgba(15,118,110,.15)}.plant-condition-icon{display:inline-grid;place-items:center;width:30px;height:30px;margin-right:7px;border-radius:9px;background:#eefaf4;font-size:20px;vertical-align:middle}.plant-card .moisture{transition:color .2s ease}.connectivity-head{margin-top:24px}.connectivity-item{border-left:4px solid #64748b}.weather-summary{background:linear-gradient(135deg,#eefaf4,#ffffff)}@media(max-width:700px){.plant-condition-icon{width:27px;height:27px;font-size:18px}}
+
+/* ===== Password prompt ===== */
+.password-prompt-overlay{
+  position:fixed;inset:0;z-index:2147483646;
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;background:rgba(24,50,71,.30);
+  backdrop-filter:blur(7px);
+}
+.password-prompt-card{
+  width:min(420px,100%);padding:24px;border-radius:20px;
+  background:#fafdff;border:1px solid #d2e1e8;
+  box-shadow:0 24px 70px rgba(45,77,98,.22);
+  color:#183247;text-align:center;
+}
+.password-prompt-icon{font-size:28px;margin-bottom:6px}
+.password-prompt-card h3{margin:0;font-size:20px}
+.password-prompt-card p{margin:7px 0 16px;color:#718899;font-size:13px}
+.password-prompt-card input{
+  width:100%;min-height:46px;padding:11px 13px;
+  border:1px solid #cbdde7;border-radius:11px;
+  background:#fff;color:#183247;text-align:left;
+  box-sizing:border-box;
+}
+.password-prompt-card input:focus{
+  outline:3px solid rgba(11,155,120,.16);
+  border-color:#55b99b;
+}
+.password-prompt-actions{display:flex;gap:9px;justify-content:flex-end;margin-top:15px}
+.password-prompt-actions button{min-width:100px}
+@media(max-width:480px){
+  .password-prompt-card{padding:20px}
+  .password-prompt-actions{display:grid;grid-template-columns:1fr 1fr}
+  .password-prompt-actions button{width:100%}
+}
