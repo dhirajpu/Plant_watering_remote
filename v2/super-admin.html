@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Plant Life Care — Factory Admin</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <script>document.write('<link rel="stylesheet" href="./styles.css?v=' + Date.now() + '">');</script>
   <script>document.write('<link rel="stylesheet" href="./enhancements.css?v=' + Date.now() + '">');</script>
 <style>.global-loader{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.82);backdrop-filter:blur(3px)}.global-loader[hidden]{display:none}.global-loader-card{min-width:260px;padding:24px 28px;border-radius:16px;background:#fff;box-shadow:0 12px 40px rgba(0,0,0,.16);text-align:center}.global-loader-card span{display:block;margin-top:7px;font-size:13px;opacity:.65}.loader-spinner{width:34px;height:34px;margin:0 auto 14px;border:4px solid #ddd;border-top-color:#333;border-radius:50%;animation:factorySpin .8s linear infinite}@keyframes factorySpin{to{transform:rotate(360deg)}}</style>
@@ -19,8 +20,8 @@
       <div class="password-prompt-card" style="position:relative;max-width:520px;margin:0;">
         <div class="password-prompt-icon">🔐</div><h3>Manufacturer authentication</h3>
         <p>Enter the manufacturer-only password to continue.</p>
-        <input id="factoryPassword" type="password" autocomplete="current-password" placeholder="Factory password">
-        <div class="password-prompt-actions"><button id="loginBtn">Unlock Factory Portal</button></div>
+        <form id="factoryLoginForm" autocomplete="off"><input id="factoryPassword" type="password" autocomplete="current-password" placeholder="Factory password"><div class="password-prompt-actions"><button id="loginBtn" type="submit">Unlock Factory Portal</button></div></form>
+        
         <p id="loginError" style="color:#b91c1c;"></p>
       </div>
     </section>
