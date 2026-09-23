@@ -30,6 +30,7 @@
       <section class="section superadmin-card"><div class="section-head"><div><h2>Factory Reset Settings</h2><p>Restores plant configuration and calibration values to firmware defaults. History is preserved.</p></div><div class="actions"><button class="danger" id="resetBtn">Factory Reset Settings</button></div></div></section>
       <section class="section superadmin-card"><div class="section-head"><div><h2>Factory Security</h2><p>Change the manufacturer-only password. It is completely separate from the customer's control password.</p></div><div class="actions"><button class="secondary" id="passwordBtn">Change Password</button></div></div></section>
     </div>
+    <div id="globalLoader" class="global-loader" hidden aria-live="polite" aria-busy="true"><div class="global-loader-card"><div class="loader-spinner"></div><strong id="globalLoaderText">Waiting for controller response…</strong><span>Please wait</span></div></div>
     <div id="toast" class="toast" hidden></div>
   </section></main>
   <script src="./config.js"></script>
