@@ -25,7 +25,7 @@ static const char *FIREBASE_BASE_URL = "https://vernal-catfish-196407.firebaseio
 static const char *DEVICE_ROOT = "/plantMonitor/v2";
 static const char *FIREBASE_AUTH = "";
 static const char *OTA_PASSWORD = "";
-static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.5_CONFIG_SECURITY";
+static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.6_AUTH_SECURITY";
 static const uint32_t PLANT_CONFIG_VERSION = 2; // Bump when source plant defaults intentionally change.
 static const char *OTA_USER = "admin";
 // Change this before the first flash on a new controller. The value is only used to initialize the NVS hash.
@@ -116,8 +116,10 @@ bool wifiConnected=false, systemReady=false, emergencyStop=false, otaInProgress=
 int activePlant=-1, displayPlant=0;
 unsigned long bootMs=0,lastSensorMs=0,lastLcdMs=0,lastRotateMs=0,lastStatusMs=0,lastCommandMs=0,lastConfigMs=0,lastTelemetryMs=0,lastWifiRetryMs=0;
 String deviceIp="offline",lastCommandId="",lastConfigVersion="";
-String controlPasswordHash="",controlSalt="",manufacturerPasswordHash="",manufacturerSalt="",authChallenge="",authChallengeId="",authChallengeRole="",controlSessionToken="",manufacturerSessionToken="";
-unsigned long authChallengeExpiresMs=0,controlSessionExpiresMs=0,manufacturerSessionExpiresMs=0,lastSecurityMs=0,lastSecurityRequestMs=0;
+String controlPasswordHash="",controlSalt="",manufacturerPasswordHash="",manufacturerSalt="";
+String customerChallenge="",customerChallengeId="",manufacturerChallenge="",manufacturerChallengeId="";
+String controlSessionToken="",manufacturerSessionToken="",otaTicket="";
+unsigned long customerChallengeExpiresMs=0,manufacturerChallengeExpiresMs=0,controlSessionExpiresMs=0,manufacturerSessionExpiresMs=0,otaTicketExpiresMs=0,lastSecurityMs=0,lastSecurityRequestMs=0;
 
 String boolJson(bool v){return v?"true":"false";}
 String modeText(PlantMode m){if(m==MODE_MANUAL)return "MANUAL";if(m==MODE_DISABLED)return "DISABLED";return "AUTO";}
@@ -215,8 +217,9 @@ bool loadPlantConfigNvs(int i){
   plants[i].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[i].soakMs/1000UL),10UL,1800UL)*1000UL;
   plants[i].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[i].minIntervalMs/60000UL),1UL,1440UL)*60000UL;
   String m=jsonValue(b,"mode");if(m.length())plants[i].mode=parseMode(m);
-  plants[i].airRaw=(int)jsonLong(b,"airRaw",plants[i].airRaw);
-  plants[i].wetRaw=(int)jsonLong(b,"wetRaw",plants[i].wetRaw);
+  plants[i].airRaw=constrain((int)jsonLong(b,"airRaw",plants[i].airRaw),SENSOR_MIN_VALID,SENSOR_MAX_VALID);
+  plants[i].wetRaw=constrain((int)jsonLong(b,"wetRaw",plants[i].wetRaw),SENSOR_MIN_VALID,SENSOR_MAX_VALID);
+  if(plants[i].airRaw==plants[i].wetRaw){plants[i].airRaw=plants[i].airRaw>SENSOR_MIN_VALID?plants[i].airRaw-1:plants[i].airRaw+1;}
   return true;
 }
 void updateConfig();
@@ -300,7 +303,9 @@ void initControlSecurity(){
   prefs.end();
 
   controlSessionToken="";controlSessionExpiresMs=0;manufacturerSessionToken="";manufacturerSessionExpiresMs=0;
-  authChallenge="";authChallengeId="";authChallengeRole="";authChallengeExpiresMs=0;
+  customerChallenge="";customerChallengeId="";customerChallengeExpiresMs=0;
+  manufacturerChallenge="";manufacturerChallengeId="";manufacturerChallengeExpiresMs=0;
+  otaTicket="";otaTicketExpiresMs=0;
 }
 bool controlSessionValid(const String &token){
   return token.length()>0 && constantTimeEqual(token,controlSessionToken) && (long)(millis()-controlSessionExpiresMs)<0;
@@ -315,32 +320,47 @@ void publishSecurityMeta(){
 }
 void handleSecurity(){
   if(!wifiConnected)return;
-  String req;
-  if(!httpGet("/security/request",req)||req.length()<2||req=="null")return;
-  String id=jsonValue(req,"id"),clientNonce=jsonValue(req,"clientNonce"),proof=jsonValue(req,"proof"),role=jsonValue(req,"role");
+  String reqCustomer,reqManufacturer;
+  httpGet("/security/request",reqCustomer);
+  httpGet("/security/manufacturer/request",reqManufacturer);
+  String req=reqManufacturer.length()&&reqManufacturer!="null"?reqManufacturer:reqCustomer;
+  bool manufacturerRequest=req==reqManufacturer&&reqManufacturer.length()&&reqManufacturer!="null";
+  if(req.length()<2||req=="null")return;
+  String id=jsonValue(req,"id"),clientNonce=jsonValue(req,"clientNonce"),proof=jsonValue(req,"proof");
   if(!id.length()||!clientNonce.length())return;
-  if(role!="manufacturer")role="customer";
-  if(id!=authChallengeId && proof.length()==0){
-    authChallengeId=id;authChallengeRole=role;authChallenge=randomHex(24);authChallengeExpiresMs=millis()+CONTROL_CHALLENGE_MS;
-    String challenge="{\"id\":\""+safetyName(id)+"\",\"role\":\""+authChallengeRole+"\",\"serverNonce\":\""+authChallenge+"\",\"expiresAtMs\":"+String(authChallengeExpiresMs)+"}";
-    httpPut("/security/challenge",challenge);return;
+  String role=manufacturerRequest?"manufacturer":"customer";
+  String &challenge=manufacturerRequest?manufacturerChallenge:customerChallenge;
+  String &challengeId=manufacturerRequest?manufacturerChallengeId:customerChallengeId;
+  unsigned long &challengeExpires=manufacturerRequest?manufacturerChallengeExpiresMs:customerChallengeExpiresMs;
+  String base=manufacturerRequest?"/security/manufacturer":"/security";
+  if(id!=challengeId && proof.length()==0){
+    challengeId=id;challenge=randomHex(24);challengeExpires=millis()+CONTROL_CHALLENGE_MS;
+    String challengeJson="{\"id\":\""+safetyName(id)+"\",\"role\":\""+role+"\",\"serverNonce\":\""+challenge+"\",\"expiresAtMs\":"+String(challengeExpires)+"}";
+    httpPut(base+"/challenge",challengeJson);return;
   }
-  if(id!=authChallengeId||role!=authChallengeRole||!proof.length()||millis()>=authChallengeExpiresMs)return;
+  if(id!=challengeId||!proof.length()||millis()>=challengeExpires)return;
   String storedHash=(role=="manufacturer")?manufacturerPasswordHash:controlPasswordHash;
-  String expected=sha256Hex(storedHash+authChallenge+clientNonce);bool ok=constantTimeEqual(proof,expected);
-  String response="{\"id\":\""+safetyName(id)+"\",\"role\":\""+authChallengeRole+"\",\"ok\":"+boolJson(ok);
+  String expected=sha256Hex(storedHash+challenge+clientNonce);
+  bool ok=constantTimeEqual(proof,expected);
+  String response="{\"id\":\""+safetyName(id)+"\",\"role\":\""+role+"\",\"ok\":"+boolJson(ok);
   if(ok){
-    String token=randomHex(32);
-    if(role=="manufacturer"){manufacturerSessionToken=token;manufacturerSessionExpiresMs=millis()+CONTROL_SESSION_MS;response+=",\"token\":\""+token+"\",\"expiresAtMs\":"+String(manufacturerSessionExpiresMs);}
-    else {controlSessionToken=token;controlSessionExpiresMs=millis()+CONTROL_SESSION_MS;response+=",\"token\":\""+token+"\",\"expiresAtMs\":"+String(controlSessionExpiresMs);}
-  } else response+=",\"error\":\"Invalid password\"";
-  response+="}";httpPut("/security/response",response);
-  authChallenge="";authChallengeId="";authChallengeRole="";authChallengeExpiresMs=0;
+    String session=randomHex(32);
+    if(role=="manufacturer"){
+      manufacturerSessionToken=session;manufacturerSessionExpiresMs=millis()+CONTROL_SESSION_MS;
+      response+=",\"token\":\""+session+"\",\"expiresAtMs\":"+String(manufacturerSessionExpiresMs);
+    }else{
+      controlSessionToken=session;controlSessionExpiresMs=millis()+CONTROL_SESSION_MS;
+      response+=",\"token\":\""+session+"\",\"expiresAtMs\":"+String(controlSessionExpiresMs);
+    }
+  }else response+=",\"error\":\"Invalid password\"";
+  response+="}";
+  httpPut(base+"/response",response);
+  challenge="";challengeId="";challengeExpires=0;
 }
 
 void handleCommand(){
   String b;if(!httpGet("/command",b)||b.length()<2||b=="null")return;String id=jsonValue(b,"id");if(!id.length()||id==lastCommandId)return;String action=jsonValue(b,"action");String authToken=jsonValue(b,"authToken");int p=(int)jsonLong(b,"plantIndex",-1);
-  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet"||action=="set_config"||action=="factory_reset_config"||action=="change_password";
+  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet"||action=="set_config"||action=="factory_reset_config"||action=="change_password"||action=="ota_ticket";
   String authRole=jsonValue(b,"authRole");if(authRole!="manufacturer")authRole="customer";
   long issuedSec=jsonLong(b,"issuedAtEpochSec",0);
   if(issuedSec<=0){long legacyMs=jsonLong(b,"issuedAtEpochMs",0);if(legacyMs>0)issuedSec=legacyMs/1000L;}
@@ -353,14 +373,17 @@ void handleCommand(){
   else if(action=="set_mode"&&p>=0&&p<NUM_PLANTS){plants[p].mode=parseMode(jsonValue(b,"mode"));savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));httpPut("/config/version",String(millis()));result="mode_set";}
   else if(action=="water_now"&&p>=0&&p<NUM_PLANTS&&!emergencyStop){unsigned long sec=constrain((unsigned long)jsonLong(b,"durationSec",5),1UL,plants[p].maxSessionMs/1000UL);states[p].manualRequest=true;states[p].manualRequestedMs=sec*1000UL;result=canStartPlant(p,true)?"queued":"blocked_by_safety";}
   else if(action=="clear_fault"&&p>=0&&p<NUM_PLANTS){states[p].waterResponseFault=false;if(states[p].sensorFault&&states[p].raw>=SENSOR_MIN_VALID&&states[p].raw<=SENSOR_MAX_VALID)states[p].sensorFault=false;if(!states[p].sensorFault){clearFaultReason(p);states[p].lastStopReason=STOP_NONE;}result="fault_cleared";}
-  else if(action=="calibrate_dry"&&p>=0&&p<NUM_PLANTS){plants[p].airRaw=states[p].raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="dry_recorded";}
-  else if(action=="calibrate_wet"&&p>=0&&p<NUM_PLANTS){plants[p].wetRaw=states[p].raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="wet_recorded";}
+  else if(action=="calibrate_dry"&&p>=0&&p<NUM_PLANTS){int raw=states[p].raw;if(raw<SENSOR_MIN_VALID||raw>SENSOR_MAX_VALID)result="invalid_sensor_raw";else if(raw==plants[p].wetRaw)result="calibration_values_must_differ";else{plants[p].airRaw=raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="dry_recorded";}}
+  else if(action=="calibrate_wet"&&p>=0&&p<NUM_PLANTS){int raw=states[p].raw;if(raw<SENSOR_MIN_VALID||raw>SENSOR_MAX_VALID)result="invalid_sensor_raw";else if(raw==plants[p].airRaw)result="calibration_values_must_differ";else{plants[p].wetRaw=raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="wet_recorded";}}
   else if(action=="set_config"&&p>=0&&p<NUM_PLANTS){String n=jsonValue(b,"name"),m=jsonValue(b,"mode");if(n.length())plants[p].name=n;plants[p].targetLow=constrain((int)jsonLong(b,"targetLow",plants[p].targetLow),0,95);plants[p].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[p].targetLow+1),plants[p].targetLow+1,100);plants[p].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[p].burstMs),1000UL,plants[p].maxBurstMs);plants[p].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[p].soakMs/1000UL),10UL,1800UL)*1000UL;plants[p].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[p].minIntervalMs/60000UL),1UL,1440UL)*60000UL;plants[p].airRaw=constrain((int)jsonLong(b,"airRaw",plants[p].airRaw),SENSOR_MIN_VALID,SENSOR_MAX_VALID);plants[p].wetRaw=constrain((int)jsonLong(b,"wetRaw",plants[p].wetRaw),SENSOR_MIN_VALID,SENSOR_MAX_VALID);if(m.length())plants[p].mode=parseMode(m);savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));httpPut("/config/version",String(millis()));result="config_set";}
   else if(action=="factory_reset_config"&&authRole=="manufacturer"){factoryResetPlantConfig();result="config_factory_reset";}
   else if(action=="factory_reset_config"){result="unauthorized";}
+  else if(action=="ota_ticket"&&authRole=="manufacturer"){otaTicket=randomHex(24);otaTicketExpiresMs=millis()+CONTROL_SESSION_MS;result="ota_ticket_issued";}
   else if(action=="change_password"){String newSalt=jsonValue(b,"newSalt"),newHash=jsonValue(b,"newHash");if(newSalt.length()>=16&&newSalt.length()<=64&&newHash.length()==64){if(authRole=="manufacturer"){prefs.begin("manufacturer",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();manufacturerSalt=newSalt;manufacturerPasswordHash=newHash;manufacturerSessionToken="";manufacturerSessionExpiresMs=0;result="manufacturer_password_changed";}else{prefs.begin("security",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();controlSalt=newSalt;controlPasswordHash=newHash;controlSessionToken="";controlSessionExpiresMs=0;result="password_changed";}}else result="invalid_password_data";}
   if(action=="water_now"&&p>=0&&p<NUM_PLANTS&&result=="queued")startSession(p,true,states[p].manualRequestedMs);
-  String ack="{\"id\":\""+safetyName(id)+"\",\"action\":\""+safetyName(action)+"\",\"result\":\""+safetyName(result)+"\",\"handledAtMs\":"+String(millis())+"}";httpPut("/commandAck",ack);lastCommandId=id;
+  String ack="{\"id\":\""+safetyName(id)+"\",\"action\":\""+safetyName(action)+"\",\"result\":\""+safetyName(result)+"\",\"handledAtMs\":"+String(millis());
+  if(action=="ota_ticket"&&result=="ota_ticket_issued")ack+=",\"ticket\":\""+otaTicket+"\"";
+  ack+="}";httpPut("/commandAck",ack);lastCommandId=id;
 }
 
 String plantJson(int i){PlantState&s=states[i];PlantConfig&c=plants[i];bool fault=s.sensorFault||s.waterResponseFault;String j="{";j+="\"name\":\""+safetyName(c.name)+"\",\"moisture\":"+String(s.moisture)+",\"raw\":"+String(s.raw)+",";j+="\"targetLow\":"+String(c.targetLow)+",\"targetHigh\":"+String(c.targetHigh)+",\"targetRange\":\""+String(c.targetLow)+"-"+String(c.targetHigh)+"%\",";j+="\"mode\":\""+modeText(c.mode)+"\",\"watering\":"+boolJson(s.watering)+",\"soaking\":"+boolJson(s.soaking)+",\"manualQueued\":"+boolJson(s.manualRequest)+",";j+="\"sensorFault\":"+boolJson(s.sensorFault)+",\"waterResponseFault\":"+boolJson(s.waterResponseFault)+",\"fault\":"+boolJson(fault)+",";j+="\"faultReason\":\""+safetyName(String(s.faultReason))+"\",\"lastStopReason\":\""+stopReasonText(s.lastStopReason)+"\",";j+="\"lastDeliveredMs\":"+String(s.lastDeliveredMs)+",\"hourlyPumpMs\":"+String(s.hourlyPumpMs)+",\"dailyPumpMs\":"+String(s.dailyPumpMs)+",\"burstMs\":"+String(c.burstMs)+",\"soakSec\":"+String(c.soakMs/1000UL)+",\"minIntervalMin\":"+String(c.minIntervalMs/60000UL)+",\"airRaw\":"+String(c.airRaw)+",\"wetRaw\":"+String(c.wetRaw)+"}";return j;}
@@ -397,43 +420,46 @@ bool saveWateringHistory(int i,const String &json){
 
 void refreshLcd(){lcd.clear();if(activePlant>=0){lcd.setCursor(0,0);lcd.print(plants[activePlant].name.substring(0,16));lcd.setCursor(0,1);lcd.print(states[activePlant].watering?"Watering":states[activePlant].soaking?"Soaking":"Running");return;}int i=displayPlant%NUM_PLANTS;lcd.setCursor(0,0);lcd.print(plants[i].name.substring(0,16));lcd.setCursor(0,1);if(states[i].sensorFault)lcd.print("Sensor fault");else if(states[i].waterResponseFault)lcd.print("Water response");else {lcd.print(states[i].moisture);lcd.print("% ");lcd.print(modeText(plants[i].mode));}}
 
+bool otaTicketValid(const String &ticket){
+  return ticket.length()>0 && constantTimeEqual(ticket,otaTicket) && (long)(millis()-otaTicketExpiresMs)<0;
+}
+String otaTicketFromRequest(){return server.hasArg("ticket")?server.arg("ticket"):"";}
+
 void handleUpdateUpload(){
   HTTPUpload &up=server.upload();
   if(up.status==UPLOAD_FILE_START){
-    if(OTA_PASSWORD[0]&&!server.authenticate(OTA_USER,OTA_PASSWORD)){return;}
+    if(!otaTicketValid(otaTicketFromRequest())){otaInProgress=false;outputsOff();return;}
     otaInProgress=true;outputsOff();
-    Serial.printf("OTA upload started: %s\n",up.filename.c_str());
+    Serial.printf("OTA upload started: %s\\n",up.filename.c_str());
     if(!Update.begin(UPDATE_SIZE_UNKNOWN)){Update.printError(Serial);otaInProgress=false;outputsOff();}
   }else if(up.status==UPLOAD_FILE_WRITE){
     if(!otaInProgress)return;
-    if(Update.write(up.buf,up.currentSize)!=up.currentSize){Update.printError(Serial);otaInProgress=false;}
+    if(Update.write(up.buf,up.currentSize)!=up.currentSize){Update.printError(Serial);otaInProgress=false;outputsOff();}
   }else if(up.status==UPLOAD_FILE_END){
     if(!otaInProgress)return;
-    if(Update.end(true))Serial.printf("OTA upload complete: %u bytes\n",up.totalSize);else {Update.printError(Serial);otaInProgress=false;outputsOff();}
+    if(Update.end(true))Serial.printf("OTA upload complete: %u bytes\\n",up.totalSize);else {Update.printError(Serial);otaInProgress=false;outputsOff();}
   }else if(up.status==UPLOAD_FILE_ABORTED){Update.abort();otaInProgress=false;outputsOff();}
 }
 
 void setupOTA(){
-  ArduinoOTA.setHostname("plant-life-care-v2");
-  if(OTA_PASSWORD[0])ArduinoOTA.setPassword(OTA_PASSWORD);
-  ArduinoOTA.onStart([](){otaInProgress=true;outputsOff();});
-  ArduinoOTA.onEnd([](){outputsOff();otaInProgress=false;});
-  ArduinoOTA.begin();
-
+  // Browser OTA is protected by a short-lived manufacturer ticket.
   server.on("/update",HTTP_GET,[](){
-    if(OTA_PASSWORD[0]&&!server.authenticate(OTA_USER,OTA_PASSWORD)){server.requestAuthentication();return;}
-    String page="<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Plant Life Care OTA</title></head><body><h2>Plant Life Care V2 OTA Update</h2><form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='firmware' accept='.bin' required><br><br><button type='submit'>Upload firmware</button></form></body></html>";
+    String ticket=otaTicketFromRequest();
+    if(!otaTicketValid(ticket)){server.send(401,"text/plain","OTA authorization expired or invalid.");return;}
+    String page="<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Plant Life Care OTA</title></head><body><h2>Plant Life Care V2 OTA Update</h2><form method='POST' action='/update?ticket="+ticket+"' enctype='multipart/form-data'><input type='file' name='firmware' accept='.bin' required><br><br><button type='submit'>Upload firmware</button></form></body></html>";
     server.send(200,"text/html",page);
   });
   server.on("/update",HTTP_POST,[](){
-    if(OTA_PASSWORD[0]&&!server.authenticate(OTA_USER,OTA_PASSWORD)){server.requestAuthentication();return;}
+    if(!otaTicketValid(otaTicketFromRequest())){server.send(401,"text/plain","OTA authorization expired or invalid.");return;}
     server.sendHeader("Connection","close");
     if(Update.hasError()){server.send(500,"text/plain","OTA update failed");otaInProgress=false;outputsOff();return;}
+    otaTicket="";otaTicketExpiresMs=0;
     server.send(200,"text/plain","OTA update successful. Rebooting...");
     delay(500);ESP.restart();
   },handleUpdateUpload);
   server.begin();
 }
+
 void connectWifi(){WiFi.mode(WIFI_STA);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);unsigned long start=millis();while(WiFi.status()!=WL_CONNECTED&&millis()-start<15000)delay(250);wifiConnected=WiFi.status()==WL_CONNECTED;deviceIp=wifiConnected?WiFi.localIP().toString():"offline";if(wifiConnected){configTime(19800,0,"pool.ntp.org","time.nist.gov");for(int i=0;i<20;i++){time_t now=time(nullptr);if(now>1700000000){timeSynced=true;break;}delay(100);}}}
 
 void setup(){
