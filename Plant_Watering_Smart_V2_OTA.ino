@@ -25,7 +25,8 @@ static const char *FIREBASE_BASE_URL = "https://vernal-catfish-196407.firebaseio
 static const char *DEVICE_ROOT = "/plantMonitor/v2";
 static const char *FIREBASE_AUTH = "";
 static const char *OTA_PASSWORD = "";
-static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.4_SECURITY";
+static const char *FIRMWARE_VERSION = "Plant_Watering_Smart_V2_OTA_1.5_CONFIG_SECURITY";
+static const uint32_t PLANT_CONFIG_VERSION = 2; // Bump when source plant defaults intentionally change.
 static const char *OTA_USER = "admin";
 // Change this before the first flash on a new controller. The value is only used to initialize the NVS hash.
 static const char *CONTROL_DEFAULT_PASSWORD = "357896";
@@ -197,6 +198,7 @@ void savePlantConfigNvs(int i){
   prefs.begin("plantcfg",false);
   prefs.putString((String("p")+i).c_str(),plantConfigJson(i));
   prefs.putBool("init",true);
+  prefs.putUInt("version",PLANT_CONFIG_VERSION);
   prefs.end();
 }
 bool loadPlantConfigNvs(int i){
@@ -216,20 +218,34 @@ bool loadPlantConfigNvs(int i){
   return true;
 }
 void updateConfig();
+void publishPlantConfigToFirebase();
+void resetPlantConfigToDefaults(bool publishToFirebase=true){
+  const PlantConfig defaults[NUM_PLANTS]={
+    {"Aglaonema",3300,1150,35,60,3000,DEFAULT_SOAK_MS,DEFAULT_MIN_INTERVAL_MS,DEFAULT_MAX_BURST_MS,DEFAULT_MAX_SESSION_MS,DEFAULT_MAX_HOURLY_MS,DEFAULT_MAX_DAILY_MS,MODE_AUTO},
+    {"Jade Plant",3400,1200,15,30,2500,DEFAULT_SOAK_MS,DEFAULT_MIN_INTERVAL_MS,DEFAULT_MAX_BURST_MS,DEFAULT_MAX_SESSION_MS,DEFAULT_MAX_HOURLY_MS,DEFAULT_MAX_DAILY_MS,MODE_AUTO},
+    {"ZZ Plant",3400,1250,20,35,2500,DEFAULT_SOAK_MS,DEFAULT_MIN_INTERVAL_MS,DEFAULT_MAX_BURST_MS,DEFAULT_MAX_SESSION_MS,DEFAULT_MAX_HOURLY_MS,DEFAULT_MAX_DAILY_MS,MODE_AUTO},
+    {"Monstera",2600,1200,35,45,3000,DEFAULT_SOAK_MS,DEFAULT_MIN_INTERVAL_MS,DEFAULT_MAX_BURST_MS,DEFAULT_MAX_SESSION_MS,DEFAULT_MAX_HOURLY_MS,DEFAULT_MAX_DAILY_MS,MODE_AUTO},
+    {"Bamboo",3400,1250,10,40,3000,DEFAULT_SOAK_MS,DEFAULT_MIN_INTERVAL_MS,DEFAULT_MAX_BURST_MS,DEFAULT_MAX_SESSION_MS,DEFAULT_MAX_HOURLY_MS,DEFAULT_MAX_DAILY_MS,MODE_AUTO}
+  };
+  for(int i=0;i<NUM_PLANTS;i++){plants[i]=defaults[i];savePlantConfigNvs(i);}
+  if(publishToFirebase&&wifiConnected)publishPlantConfigToFirebase();
+}
+void factoryResetPlantConfig(){resetPlantConfigToDefaults(true);}
+
 void loadOrMigratePlantConfig(){
   prefs.begin("plantcfg",true);
   bool initialized=prefs.getBool("init",false);
+  uint32_t storedVersion=prefs.getUInt("version",0);
   prefs.end();
-  if(initialized){
+  if(initialized&&storedVersion==PLANT_CONFIG_VERSION){
     for(int i=0;i<NUM_PLANTS;i++)loadPlantConfigNvs(i);
     return;
   }
-  // One-time migration of the existing Firebase configuration into local NVS.
-  updateConfig();
-  for(int i=0;i<NUM_PLANTS;i++)savePlantConfigNvs(i);
+  resetPlantConfigToDefaults(true);
 }
 
-void updateConfig(){for(int i=0;i<NUM_PLANTS;i++){String b;if(!httpGet(String("/config/plants/")+i,b)||!b.length()||b=="null")continue;String n=jsonValue(b,"name");if(n.length())plants[i].name=n;plants[i].targetLow=constrain((int)jsonLong(b,"targetLow",plants[i].targetLow),0,95);plants[i].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[i].targetHigh),plants[i].targetLow+1,100);plants[i].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[i].burstMs),1000UL,plants[i].maxBurstMs);plants[i].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[i].soakMs/1000UL),10UL,1800UL)*1000UL;plants[i].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[i].minIntervalMs/60000UL),1UL,1440UL)*60000UL;String m=jsonValue(b,"mode");if(m.length())plants[i].mode=parseMode(m);}}
+void updateConfig(){for(int i=0;i<NUM_PLANTS;i++){String b;if(!httpGet(String("/config/plants/")+i,b)||!b.length()||b=="null")continue;String n=jsonValue(b,"name");if(n.length())plants[i].name=n;plants[i].targetLow=constrain((int)jsonLong(b,"targetLow",plants[i].targetLow),0,95);plants[i].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[i].targetLow+1),plants[i].targetLow+1,100);plants[i].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[i].burstMs),1000UL,plants[i].maxBurstMs);plants[i].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[i].soakMs/1000UL),10UL,1800UL)*1000UL;plants[i].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[i].minIntervalMs/60000UL),1UL,1440UL)*60000UL;String m=jsonValue(b,"mode");if(m.length())plants[i].mode=parseMode(m);}}
+void publishPlantConfigToFirebase(){for(int i=0;i<NUM_PLANTS;i++)httpPut(String("/config/plants/")+i,plantConfigJson(i));httpPut("/config/schemaVersion",String(PLANT_CONFIG_VERSION));}
 
 String sha256Hex(const String &input){
   uint8_t digest[32];
@@ -299,7 +315,7 @@ void handleSecurity(){
 
 void handleCommand(){
   String b;if(!httpGet("/command",b)||b.length()<2||b=="null")return;String id=jsonValue(b,"id");if(!id.length()||id==lastCommandId)return;String action=jsonValue(b,"action");String authToken=jsonValue(b,"authToken");int p=(int)jsonLong(b,"plantIndex",-1);
-  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet"||action=="set_config"||action=="change_password";
+  bool protectedAction=action=="emergency_stop"||action=="resume"||action=="set_mode"||action=="water_now"||action=="clear_fault"||action=="calibrate_dry"||action=="calibrate_wet"||action=="set_config"||action=="factory_reset_config"||action=="change_password";
   long issuedSec=jsonLong(b,"issuedAtEpochSec",0);
   if(issuedSec<=0){long legacyMs=jsonLong(b,"issuedAtEpochMs",0);if(legacyMs>0)issuedSec=legacyMs/1000L;}
   bool valid=true;
@@ -314,6 +330,7 @@ void handleCommand(){
   else if(action=="calibrate_dry"&&p>=0&&p<NUM_PLANTS){plants[p].airRaw=states[p].raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="dry_recorded";}
   else if(action=="calibrate_wet"&&p>=0&&p<NUM_PLANTS){plants[p].wetRaw=states[p].raw;savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));result="wet_recorded";}
   else if(action=="set_config"&&p>=0&&p<NUM_PLANTS){String n=jsonValue(b,"name"),m=jsonValue(b,"mode");if(n.length())plants[p].name=n;plants[p].targetLow=constrain((int)jsonLong(b,"targetLow",plants[p].targetLow),0,95);plants[p].targetHigh=constrain((int)jsonLong(b,"targetHigh",plants[p].targetHigh),plants[p].targetLow+1,100);plants[p].burstMs=constrain((unsigned long)jsonLong(b,"burstMs",plants[p].burstMs),1000UL,plants[p].maxBurstMs);plants[p].soakMs=constrain((unsigned long)jsonLong(b,"soakSec",plants[p].soakMs/1000UL),10UL,1800UL)*1000UL;plants[p].minIntervalMs=constrain((unsigned long)jsonLong(b,"minIntervalMin",plants[p].minIntervalMs/60000UL),1UL,1440UL)*60000UL;if(m.length())plants[p].mode=parseMode(m);savePlantConfigNvs(p);httpPut(String("/config/plants/")+p,plantConfigJson(p));httpPut("/config/version",String(millis()));result="config_set";}
+  else if(action=="factory_reset_config"){factoryResetPlantConfig();result="config_factory_reset";}
   else if(action=="change_password"){String newSalt=jsonValue(b,"newSalt"),newHash=jsonValue(b,"newHash");if(newSalt.length()>=16&&newSalt.length()<=64&&newHash.length()==64){prefs.begin("security",false);prefs.putString("salt",newSalt);prefs.putString("passHash",newHash);prefs.end();controlSalt=newSalt;controlPasswordHash=newHash;result="password_changed";}else result="invalid_password_data";}
   if(action=="water_now"&&p>=0&&p<NUM_PLANTS&&result=="queued")startSession(p,true,states[p].manualRequestedMs);
   String ack="{\"id\":\""+safetyName(id)+"\",\"action\":\""+safetyName(action)+"\",\"result\":\""+safetyName(result)+"\",\"handledAtMs\":"+String(millis())+"}";httpPut("/commandAck",ack);lastCommandId=id;
