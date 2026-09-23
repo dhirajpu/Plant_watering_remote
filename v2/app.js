@@ -71,8 +71,21 @@ function esc(v){return String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&
 function fmtMin(v){const n=Number(v||0);return n<60?`${n} min`:`${Math.floor(n/60)}h ${n%60}m`}
 function fmtHistoryDate(v){if(!v)return '';const d=new Date(v);return Number.isNaN(d.getTime())?'':d.toLocaleString(undefined,{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function toast(msg){const e=document.getElementById('toast');e.textContent=msg;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,3000)}
-let loaderDepth=0,loaderTimer=null;
-function setLoader(active,message='Loading…'){const loader=document.getElementById('startupLoader');if(!loader)return;const text=loader.querySelector('.startup-loader-card span');if(message&&text)text.textContent=message;loader.classList.toggle('hidden',!active);document.documentElement.classList.toggle('loader-active',active);document.body.classList.toggle('loader-active',active);if(active){clearTimeout(loaderTimer);loaderTimer=setTimeout(()=>{loaderDepth=0;loader.classList.add('hidden');document.documentElement.classList.remove('loader-active');document.body.classList.remove('loader-active')},15000)}}
+let loaderDepth=0;
+function setLoader(active,message='Loading…'){
+  const loader=document.getElementById('startupLoader');
+  if(!loader)return;
+  const text=loader.querySelector('[data-loader-message],.startup-loader-card span');
+  if(message&&text)text.textContent=message;
+  loader.hidden=!active;
+  loader.style.display=active?'flex':'none';
+  loader.style.pointerEvents=active?'auto':'none';
+  loader.setAttribute('aria-busy',active?'true':'false');
+  document.documentElement.classList.toggle('loader-active',active);
+  document.body.classList.toggle('loader-active',active);
+  const main=document.querySelector('main.page');
+  if(main)main.inert=active;
+}
 function beginLoader(message){loaderDepth++;setLoader(true,message)}
 function endLoader(){loaderDepth=Math.max(0,loaderDepth-1);if(loaderDepth===0){clearTimeout(loaderTimer);setLoader(false)}}
 async function withLoader(message,task){beginLoader(message);try{return await task()}finally{endLoader()}}
