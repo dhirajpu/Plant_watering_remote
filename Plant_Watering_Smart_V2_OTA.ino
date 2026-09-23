@@ -230,7 +230,13 @@ void resetPlantConfigToDefaults(bool publishToFirebase=true){
   for(int i=0;i<NUM_PLANTS;i++){plants[i]=defaults[i];savePlantConfigNvs(i);}
   if(publishToFirebase&&wifiConnected)publishPlantConfigToFirebase();
 }
-void factoryResetPlantConfig(){resetPlantConfigToDefaults(true);}
+void factoryResetPlantConfig(){
+  outputsOff();
+  activePlant=-1;
+  for(int i=0;i<NUM_PLANTS;i++){states[i].manualRequest=false;states[i].manualRequestedMs=0;}
+  resetPlantConfigToDefaults(true);
+  Serial.printf("Plant configuration factory reset to version %lu\\n",(unsigned long)PLANT_CONFIG_VERSION);
+}
 
 void loadOrMigratePlantConfig(){
   prefs.begin("plantcfg",true);
