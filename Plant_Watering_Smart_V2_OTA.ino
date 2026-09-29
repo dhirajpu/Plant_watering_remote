@@ -183,12 +183,12 @@ void loadEmergency(){prefs.begin("safety",true);emergencyStop=prefs.getBool("est
 bool canStartPlant(int i,bool manual){if(i<0||i>=NUM_PLANTS)return false;PlantState&s=states[i];PlantConfig&c=plants[i];if(!bootAllowsWatering()||emergencyStop||s.sensorFault||s.waterResponseFault||c.mode==MODE_DISABLED)return false;if(!manual&&c.mode!=MODE_AUTO)return false;if(!manual&&s.moisture>=c.targetLow)return false;if(s.lastWateredMs&&millis()-s.lastWateredMs<c.minIntervalMs)return false;if(s.hourlyPumpMs>=c.maxHourlyMs||s.dailyPumpMs>=c.maxDailyMs)return false;return true;}
 void startSession(int i,bool manual,unsigned long durationMs){if(!canStartPlant(i,manual))return;PlantState&s=states[i];activePlant=i;s.manualRequest=manual;s.manualRequestedMs=durationMs;s.sessionStartMs=millis();s.sessionPumpMs=0;s.moistureAtSessionStart=s.moisture;s.responseDeadlineMs=manual?0:millis()+WATER_RESPONSE_TIMEOUT_MS;s.soaking=false;s.watering=false;s.lastStopReason=STOP_NONE;clearFaultReason(i);}
 void startBurst(int i){PlantState&s=states[i];digitalWrite(VALVE_PINS[i],RELAY_ON);delay(VALVE_PREOPEN_MS);digitalWrite(PUMP_PIN,RELAY_ON);s.watering=true;s.burstStartMs=millis();}
-void finishSession(int i,StopReason reason){PlantState&s=states[i];digitalWrite(PUMP_PIN,RELAY_OFF);delay(VALVE_POSTPUMP_MS);closeAllValves();s.watering=false;s.soaking=false;s.lastWateredMs=millis();s.lastDeliveredMs=s.sessionPumpMs;s.lastStopReason=reason;if(reason!=STOP_WATER_RESPONSE&&!s.sensorFault)clearFaultReason(i);if(s.sessionPumpMs>0){s.hourlyPumpMs+=s.sessionPumpMs;s.dailyPumpMs+=s.sessionPumpMs;saveRuntime(i);}String completionTimestamp=historyTimestamp();unsigned long long completionEpochMs=historyEpochMs();String h="{\"plantIndex\":"+String(i)+",\"plantName\":\""+safetyName(plants[i].name)+"\",\"durationMs\":"+String(s.sessionPumpMs)+",\"reason\":\""+stopReasonText(reason)+"\",\"moistureStart\":"+String(s.moistureAtSessionStart)+",\"moistureEnd\":"+String(s.moisture)+",\"timestamp\":\""+completionTimestamp+"\",\"timestampEpochMs\":"+String(completionEpochMs)+"}";saveWateringHistory(i,h);s.manualRequest=false;s.manualRequestedMs=0;activePlant=-1;}
+void finishSession(int i,StopReason reason){PlantState&s=states[i];digitalWrite(PUMP_PIN,RELAY_OFF);delay(VALVE_POSTPUMP_MS);closeAllValves();s.watering=false;s.soaking=false;s.lastDeliveredMs=s.sessionPumpMs;s.lastStopReason=reason;if(reason!=STOP_WATER_RESPONSE&&!s.sensorFault)clearFaultReason(i);if(s.sessionPumpMs>0){s.lastWateredMs=millis();s.hourlyPumpMs+=s.sessionPumpMs;s.dailyPumpMs+=s.sessionPumpMs;saveRuntime(i);String completionTimestamp=historyTimestamp();unsigned long long completionEpochMs=historyEpochMs();String h="{\"plantIndex\":"+String(i)+",\"plantName\":\""+safetyName(plants[i].name)+"\",\"durationMs\":"+String(s.sessionPumpMs)+",\"reason\":\""+stopReasonText(reason)+"\",\"moistureStart\":"+String(s.moistureAtSessionStart)+",\"moistureEnd\":"+String(s.moisture)+",\"timestamp\":\""+completionTimestamp+"\",\"timestampEpochMs\":"+String(completionEpochMs)+"}";saveWateringHistory(i,h);}s.manualRequest=false;s.manualRequestedMs=0;activePlant=-1;}
 void stopBurst(int i,StopReason reason){PlantState&s=states[i];if(s.watering){s.sessionPumpMs+=millis()-s.burstStartMs;s.watering=false;digitalWrite(PUMP_PIN,RELAY_OFF);delay(VALVE_POSTPUMP_MS);closeAllValves();}s.soaking=false;if(reason==STOP_SENSOR_FAULT)s.sensorFault=true;s.lastStopReason=reason;if(reason!=STOP_WATER_RESPONSE&&!s.sensorFault)clearFaultReason(i);}
 void evaluateWatering(){
   if(activePlant<0)return;int i=activePlant;PlantState&s=states[i];PlantConfig&c=plants[i];
-  if(emergencyStop){stopBurst(i,STOP_EMERGENCY);activePlant=-1;return;}
-  if(s.sensorFault){stopBurst(i,STOP_SENSOR_FAULT);activePlant=-1;return;}
+  if(emergencyStop){stopBurst(i,STOP_EMERGENCY);if(s.sessionPumpMs>0)finishSession(i,STOP_EMERGENCY);else{activePlant=-1;s.manualRequest=false;s.manualRequestedMs=0;}return;}
+  if(s.sensorFault){stopBurst(i,STOP_SENSOR_FAULT);if(s.sessionPumpMs>0)finishSession(i,STOP_SENSOR_FAULT);else{activePlant=-1;s.manualRequest=false;s.manualRequestedMs=0;}return;}
   if(s.watering){unsigned long run=millis()-s.burstStartMs;if(run>=c.burstMs||s.sessionPumpMs+run>=c.maxSessionMs){s.sessionPumpMs+=run;s.watering=false;digitalWrite(PUMP_PIN,RELAY_OFF);delay(VALVE_POSTPUMP_MS);closeAllValves();s.soaking=true;s.soakUntilMs=millis()+c.soakMs;return;}if(s.manualRequest&&s.sessionPumpMs+run>=s.manualRequestedMs){s.sessionPumpMs+=run;s.watering=false;digitalWrite(PUMP_PIN,RELAY_OFF);delay(VALVE_POSTPUMP_MS);closeAllValves();finishSession(i,STOP_MANUAL_COMPLETE);return;}}
   if(s.soaking){if(millis()<s.soakUntilMs)return;s.soaking=false;if(s.manualRequest){finishSession(i,STOP_MANUAL_COMPLETE);return;}if(s.moisture>=c.targetHigh){finishSession(i,STOP_TARGET_REACHED);return;}if(s.responseDeadlineMs&&millis()>=s.responseDeadlineMs&&s.moisture-s.moistureAtSessionStart<MIN_MOISTURE_GAIN_PERCENT){setWaterFault(i,"Soil moisture did not increase after watering");finishSession(i,STOP_WATER_RESPONSE);return;}if(millis()-s.sessionStartMs>=c.maxSessionMs){finishSession(i,STOP_SESSION_LIMIT);return;}startBurst(i);return;}
   if(!s.watering&&!s.soaking)startBurst(i);
@@ -404,19 +404,53 @@ String wateringHistoryId(int i){
   id+="-p"+String(i)+"-"+String(seq);
   return id;
 }
+void retryPendingWateringHistory(){
+  prefs.begin("histq",false);
+  uint32_t count=prefs.getUInt("count",0);
+  prefs.end();
+  if(!count||!wifiConnected)return;
+  for(uint32_t idx=0;idx<count;idx++){
+    prefs.begin("histq",true);
+    String key=prefs.getString((String("k")+idx).c_str(),"");
+    String json=prefs.getString((String("j")+idx).c_str(),"");
+    prefs.end();
+    if(!key.length()||!json.length())continue;
+    if(httpPut(String("/history/watering/")+key,json)){
+      prefs.begin("histq",false);
+      uint32_t current=prefs.getUInt("count",0);
+      for(uint32_t j=idx+1;j<current;j++){
+        String nk=prefs.getString((String("k")+j).c_str(),"");
+        String nj=prefs.getString((String("j")+j).c_str(),"");
+        prefs.putString((String("k")+(j-1)).c_str(),nk);
+        prefs.putString((String("j")+(j-1)).c_str(),nj);
+      }
+      if(current){prefs.remove((String("k")+(current-1)).c_str());prefs.remove((String("j")+(current-1)).c_str());prefs.putUInt("count",current-1);}
+      prefs.end();
+      count--; idx--; Serial.printf("Pending watering history uploaded: key=%s\\n",key.c_str());
+    }else{ Serial.printf("Pending watering history retry failed: key=%s\\n",key.c_str()); break; }
+  }
+}
+
+bool queueWateringHistory(const String &key,const String &json){
+  prefs.begin("histq",false);
+  uint32_t count=prefs.getUInt("count",0);
+  if(count>=32){prefs.end();Serial.println("Watering history queue full; record could not be persisted.");return false;}
+  prefs.putString((String("k")+count).c_str(),key);
+  prefs.putString((String("j")+count).c_str(),json);
+  prefs.putUInt("count",count+1);
+  prefs.end();
+  Serial.printf("Watering history queued locally: key=%s pending=%u\\n",key.c_str(),(unsigned)(count+1));
+  return true;
+}
+
 bool saveWateringHistory(int i,const String &json){
   String key=wateringHistoryId(i);
-  String path="/history/watering/"+key;
   for(int attempt=1;attempt<=3;attempt++){
-    if(httpPut(path,json)){
-      Serial.printf("Watering history saved: plant=%d key=%s attempt=%d\\n",i,key.c_str(),attempt);
-      return true;
-    }
+    if(httpPut(String("/history/watering/")+key,json)){Serial.printf("Watering history saved: plant=%d key=%s attempt=%d\\n",i,key.c_str(),attempt);return true;}
     Serial.printf("Watering history save failed: plant=%d key=%s attempt=%d\\n",i,key.c_str(),attempt);
     if(attempt<3)delay(250*attempt);
   }
-  Serial.printf("Watering history permanently failed for key=%s; existing Firebase history is unchanged.\\n",key.c_str());
-  return false;
+  return queueWateringHistory(key,json);
 }
 
 void refreshLcd(){lcd.clear();if(activePlant>=0){lcd.setCursor(0,0);lcd.print(plants[activePlant].name.substring(0,16));lcd.setCursor(0,1);lcd.print(states[activePlant].watering?"Watering":states[activePlant].soaking?"Soaking":"Running");return;}int i=displayPlant%NUM_PLANTS;lcd.setCursor(0,0);lcd.print(plants[i].name.substring(0,16));lcd.setCursor(0,1);if(states[i].sensorFault)lcd.print("Sensor fault");else if(states[i].waterResponseFault)lcd.print("Water response");else {lcd.print(states[i].moisture);lcd.print("% ");lcd.print(modeText(plants[i].mode));}}
@@ -473,6 +507,7 @@ void loop(){
   else {wifiConnected=true;deviceIp=WiFi.localIP().toString();}
   if(millis()-lastSensorMs>=SENSOR_SAMPLE_MS)sampleSensors();
   if(millis()-lastCommandMs>=COMMAND_MS){lastCommandMs=millis();handleCommand();}
+  if(millis()-lastHistoryRetryMs>=30000UL){lastHistoryRetryMs=millis();retryPendingWateringHistory();}
   if(millis()-lastSecurityMs>=SECURITY_POLL_MS){lastSecurityMs=millis();handleSecurity();}
   if(millis()-lastSecurityRequestMs>=15000UL){lastSecurityRequestMs=millis();publishSecurityMeta();}
   if(activePlant<0){for(int i=0;i<NUM_PLANTS;i++){if(states[i].manualRequest&&canStartPlant(i,true)){startSession(i,true,states[i].manualRequestedMs);break;}if(plants[i].mode==MODE_AUTO&&canStartPlant(i,false)&&states[i].moisture<=plants[i].targetLow){startSession(i,false,0);break;}}}
