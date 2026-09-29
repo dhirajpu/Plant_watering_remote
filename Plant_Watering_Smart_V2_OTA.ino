@@ -114,7 +114,7 @@ Preferences prefs;
 WebServer server(80);
 bool wifiConnected=false, systemReady=false, emergencyStop=false, otaInProgress=false, timeSynced=false;
 int activePlant=-1, displayPlant=0;
-unsigned long bootMs=0,lastSensorMs=0,lastLcdMs=0,lastRotateMs=0,lastStatusMs=0,lastCommandMs=0,lastConfigMs=0,lastTelemetryMs=0,lastWifiRetryMs=0;
+unsigned long bootMs=0,lastSensorMs=0,lastLcdMs=0,lastRotateMs=0,lastStatusMs=0,lastCommandMs=0,lastConfigMs=0,lastTelemetryMs=0,lastWifiRetryMs=0,lastHistoryRetryMs=0;
 String deviceIp="offline",lastCommandId="",lastConfigVersion="";
 String controlPasswordHash="",controlSalt="",manufacturerPasswordHash="",manufacturerSalt="";
 String customerChallenge="",customerChallengeId="",manufacturerChallenge="",manufacturerChallengeId="";
